@@ -21,15 +21,22 @@ public class addEditSupplierForm extends javax.swing.JFrame {
     /**
      * Creates new form addEditSupplierForm
      */
+    private Supplierlist parentList;   // add as a field near the top
+
     public addEditSupplierForm() {
-        initComponents();
-        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE); // overrides EXIT_ON_CLOSE set in initComponents()
-        jButton1.addActionListener(evt -> dispose());        // custom "x" close button
-        jButton2.addActionListener(evt -> dispose());        // Cancel
-        jButton3.addActionListener(evt -> saveSupplier());   // Save
-        loadSupplierCount();
+        this(null);
     }
 
+    public addEditSupplierForm(Supplierlist parent) {
+        this.parentList = parent;
+        initComponents();
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+        jButton1.addActionListener(evt -> dispose());
+        jButton2.addActionListener(evt -> dispose());
+        jButton3.addActionListener(evt -> saveSupplier());
+        loadSupplierCount();
+    }
+    
     private void loadSupplierCount() {
         String sql = "SELECT COUNT(*) FROM suppliers WHERE status = 'Active'";
         try (Connection conn = DBConnection.getConnection();
@@ -333,8 +340,13 @@ public class addEditSupplierForm extends javax.swing.JFrame {
 
             stmt.executeUpdate();
 
-            JOptionPane.showMessageDialog(this, "Supplier saved successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
-            dispose();
+        JOptionPane.showMessageDialog(this, "Supplier saved successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
+
+        if (parentList != null) {
+            parentList.loadSuppliers();   // ← refresh the list behind it
+        }
+
+        dispose();
 
         } catch (SQLException ex) {
             logger.log(java.util.logging.Level.SEVERE, "Error while saving supplier", ex);

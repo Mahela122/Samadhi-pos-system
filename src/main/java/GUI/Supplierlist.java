@@ -5,6 +5,13 @@
 package GUI;
 
 import javax.swing.JOptionPane;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import CODE.DBConnection;
+import javax.swing.RowFilter;
+import javax.swing.table.TableRowSorter;
 /**
  *
  * @author Minethma
@@ -18,8 +25,100 @@ public class Supplierlist extends javax.swing.JFrame {
      */
     public Supplierlist() {
         initComponents();
+        loadSuppliers();
+
+        // Set up the row sorter for filtering
+        sorter = new javax.swing.table.TableRowSorter<>((javax.swing.table.DefaultTableModel) jTable1.getModel());
+        jTable1.setRowSorter(sorter);
+
+        // Placeholder-clearing behavior + live filtering as the user types
+        jTextField1.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusGained(java.awt.event.FocusEvent evt) {
+                if (jTextField1.getText().equals("Search by name,contact,items")) {
+                    jTextField1.setText("");
+                }
+            }
+            @Override
+            public void focusLost(java.awt.event.FocusEvent evt) {
+                if (jTextField1.getText().isEmpty()) {
+                    jTextField1.setText("Search by name,contact,items");
+                }
+            }
+        });
+
+        jTextField1.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { filterTable(); }
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { filterTable(); }
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { filterTable(); }
+        });
     }
 
+    public void loadSuppliers() {
+        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+        model.setRowCount(0);
+
+        String sql = "SELECT supplier_name, contact_person, phone_number, status FROM suppliers";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                model.addRow(new Object[]{
+                    rs.getString("supplier_name"),
+                    rs.getString("contact_person"),
+                    rs.getString("phone_number"),
+                    "-",                          // Item Supplied — no direct column; placeholder for now
+                    0,                            // Supplies Count — needs a join/count query later
+                    rs.getString("status"),
+                    ""                            // Action column
+                });
+            }
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load suppliers", e);
+            JOptionPane.showMessageDialog(this, "Failed to load suppliers: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+
+        updateSummaryCounts();
+    }
+
+    // ← ADD THIS TOO — updates the 3 summary cards at the top
+    private void updateSummaryCounts() {
+        String sql = "SELECT "
+                   + "COUNT(*) AS total, "
+                   + "SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) AS active_count "
+                   + "FROM suppliers";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            if (rs.next()) {
+                jLabel3.setText(String.valueOf(rs.getInt("total")));
+                jLabel5.setText(String.valueOf(rs.getInt("active_count")));
+            }
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load supplier summary", e);
+        }
+    }
+    
+    private void filterTable() {
+        String text = jTextField1.getText().trim();
+
+        if (text.isEmpty() || text.equals("Search by name,contact,items")) {
+            sorter.setRowFilter(null);   // show everything
+            return;
+        }
+
+        // Case-insensitive search across Supplier Name (col 0), Contact Person (col 1), Item Supplied (col 3)
+        RowFilter<Object, Object> filter = RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0, 1, 3);
+        sorter.setRowFilter(filter);
+    }
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -233,9 +332,10 @@ public class Supplierlist extends javax.swing.JFrame {
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
         try {
-            addEditSupplierForm form = new addEditSupplierForm();
+            addEditSupplierForm form = new addEditSupplierForm(this);
             form.setLocationRelativeTo(this);
-            form.setVisible(true);
+            form.setVisible(true);   // blocks here until form is disposed, since JFrame is modal-like in this flow
+            loadSuppliers();         // ← ADD THIS LINE — refresh after the form closes
         } catch (Exception ex) {
             logger.log(java.util.logging.Level.SEVERE, "Failed to open Add Supplier form", ex);
             JOptionPane.showMessageDialog(this,
@@ -287,4 +387,5 @@ public class Supplierlist extends javax.swing.JFrame {
     private javax.swing.JTable jTable1;
     private javax.swing.JTextField jTextField1;
     // End of variables declaration//GEN-END:variables
+    private javax.swing.table.TableRowSorter<javax.swing.table.DefaultTableModel> sorter;
 }
