@@ -7,6 +7,11 @@ package GUI;
 import CODE.CustomerActionRenderer;
 import CODE.CustomerActionEditor;
 import javax.swing.JOptionPane;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import CODE.DBConnection;
 /**
  *
  * @author tharu
@@ -37,7 +42,35 @@ public class Customer_management extends javax.swing.JFrame {
             }
         }
     }));
+    loadCustomers();
 }
+    
+    public void loadCustomers() {
+        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+        model.setRowCount(0);
+
+        String sql = "SELECT full_name, phone_number, loyalty_tier, loyalty_points FROM customers";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String name = rs.getString("full_name");
+                model.addRow(new Object[]{
+                    (name == null || name.isEmpty()) ? "-" : name,
+                    rs.getString("phone_number"),
+                    rs.getString("loyalty_tier"),
+                    rs.getInt("loyalty_points"),
+                    ""
+                });
+            }
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Failed to load customers: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
 
     /**
      * This method is called from within the constructor to initialize the form.
