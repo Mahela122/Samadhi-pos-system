@@ -28,21 +28,143 @@ public class Delivery_Tracking extends javax.swing.JFrame {
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
+        jScrollPane4 = new javax.swing.JScrollPane();
+        jTextArea3 = new javax.swing.JTextArea();
+        jPanel1 = new javax.swing.JPanel();
+        Delivery_Tracking_Plain_Text = new javax.swing.JLabel();
+        PendingBtn = new javax.swing.JButton();
+        DispatchedBtn = new javax.swing.JButton();
+        DeliveredBtn = new javax.swing.JButton();
+        jScrollPane2 = new javax.swing.JScrollPane();
+        Pending_TextArea = new javax.swing.JTextArea();
+        jScrollPane3 = new javax.swing.JScrollPane();
+        Delivered_TextArea = new javax.swing.JTextArea();
+        jScrollPane5 = new javax.swing.JScrollPane();
+        Dispatched_TextArea = new javax.swing.JTextArea();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        ORD_Tracking_Table = new javax.swing.JTable();
+
+        jTextArea3.setColumns(20);
+        jTextArea3.setRows(5);
+        jScrollPane4.setViewportView(jTextArea3);
+
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+
+        jPanel1.setBackground(new java.awt.Color(204, 255, 255));
+
+        Delivery_Tracking_Plain_Text.setFont(new java.awt.Font("Segoe UI", 1, 21)); // NOI18N
+        Delivery_Tracking_Plain_Text.setText("Delivery Tracking");
+
+        PendingBtn.setText("Pending");
+
+        DispatchedBtn.setText("Dispatched");
+        DispatchedBtn.addActionListener(this::DispatchedBtnActionPerformed);
+
+        DeliveredBtn.setText("Delivered");
+
+        Pending_TextArea.setColumns(20);
+        Pending_TextArea.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        Pending_TextArea.setRows(5);
+        Pending_TextArea.setText("Pending\n8");
+        jScrollPane2.setViewportView(Pending_TextArea);
+
+        Delivered_TextArea.setColumns(20);
+        Delivered_TextArea.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        Delivered_TextArea.setRows(5);
+        Delivered_TextArea.setText("Delivered\n34\n");
+        jScrollPane3.setViewportView(Delivered_TextArea);
+
+        Dispatched_TextArea.setColumns(20);
+        Dispatched_TextArea.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        Dispatched_TextArea.setRows(5);
+        Dispatched_TextArea.setText("Dispatched\n12");
+        jScrollPane5.setViewportView(Dispatched_TextArea);
+
+        ORD_Tracking_Table.setModel(new javax.swing.table.DefaultTableModel(
+            new Object [][] {
+                {"#ORD-8842", "42 Peradeniya Road Kandy", "Brass Oil Lamp", "Pending", "15 Oct 2024", null},
+                {"#ORD-8839", "108 Gall Road Colombo", "Sandalwood Incense", "Dispatched", "14 Oct 2024", null},
+                {"#ORD-8835", "Sri bodiraja Viharaya,Anuradapura", "Sandalwood Buddha Statue", "Delivered", "12 Oct 2024", null},
+                {"#ORD-8831", "15/4 Temple Road, Negambo", "Bodhi Leaf Clay Plates x50", "Pending", "11 Oct 2024", null},
+                {"#ORD-8828", "234 Matara Road, Galle", "White Brass Offering Bowl", "Dispatched", "10 Oct 2024", null},
+                {"#ORD-8824", "88 Kurunegala Hwy, Dambulla", "Prayer Beads (Sandalwood) x3", "Delivered", "08 Oct 2024", null}
+            },
+            new String [] {
+                "Order ID", "Delivery Address", "Items", "Status", "Delivery Date", "Action"
+            }
+        ) {
+            Class[] types = new Class [] {
+                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class
+            };
+
+            public Class getColumnClass(int columnIndex) {
+                return types [columnIndex];
+            }
+        });
+        jScrollPane1.setViewportView(ORD_Tracking_Table);
+
+        javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
+        jPanel1.setLayout(jPanel1Layout);
+        jPanel1Layout.setHorizontalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(19, 19, 19)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(Delivery_Tracking_Plain_Text)
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addComponent(PendingBtn)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(DispatchedBtn)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(DeliveredBtn))
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 160, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addGap(59, 59, 59)
+                                .addComponent(jScrollPane5, javax.swing.GroupLayout.PREFERRED_SIZE, 150, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addGap(62, 62, 62)
+                        .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 150, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 1160, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addContainerGap(21, Short.MAX_VALUE))
+        );
+        jPanel1Layout.setVerticalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(22, 22, 22)
+                .addComponent(Delivery_Tracking_Plain_Text)
+                .addGap(18, 18, 18)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(PendingBtn)
+                    .addComponent(DispatchedBtn)
+                    .addComponent(DeliveredBtn))
+                .addGap(44, 44, 44)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jScrollPane5, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(43, 43, 43)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 150, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(311, Short.MAX_VALUE))
+        );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
         getContentPane().setLayout(layout);
         layout.setHorizontalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 400, Short.MAX_VALUE)
+            .addComponent(jPanel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 300, Short.MAX_VALUE)
+            .addComponent(jPanel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
         );
 
         pack();
     }// </editor-fold>//GEN-END:initComponents
+
+    private void DispatchedBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_DispatchedBtnActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_DispatchedBtnActionPerformed
 
     /**
      * @param args the command line arguments
@@ -70,5 +192,20 @@ public class Delivery_Tracking extends javax.swing.JFrame {
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JButton DeliveredBtn;
+    private javax.swing.JTextArea Delivered_TextArea;
+    private javax.swing.JLabel Delivery_Tracking_Plain_Text;
+    private javax.swing.JButton DispatchedBtn;
+    private javax.swing.JTextArea Dispatched_TextArea;
+    private javax.swing.JTable ORD_Tracking_Table;
+    private javax.swing.JButton PendingBtn;
+    private javax.swing.JTextArea Pending_TextArea;
+    private javax.swing.JPanel jPanel1;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JScrollPane jScrollPane2;
+    private javax.swing.JScrollPane jScrollPane3;
+    private javax.swing.JScrollPane jScrollPane4;
+    private javax.swing.JScrollPane jScrollPane5;
+    private javax.swing.JTextArea jTextArea3;
     // End of variables declaration//GEN-END:variables
 }
