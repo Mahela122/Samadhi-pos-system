@@ -4,6 +4,14 @@
  */
 package GUI;
 
+import CODE.CustomerActionRenderer;
+import CODE.CustomerActionEditor;
+import javax.swing.JOptionPane;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import CODE.DBConnection;
 /**
  *
  * @author tharu
@@ -14,9 +22,55 @@ public class Customer_management extends javax.swing.JFrame {
      * Creates new form Customer_management
      */
     public Customer_management() {
-        initComponents();
-        btnadd.addActionListener(evt -> openNewCustomerDialog());
+    initComponents();
+    jTable1.setRowHeight(40);
+    btnadd.addActionListener(evt -> openNewCustomerDialog());
+
+    jTable1.getColumn("Action").setCellRenderer(new CustomerActionRenderer());
+    jTable1.getColumn("Action").setCellEditor(new CustomerActionEditor(new CustomerActionEditor.CustomerActions() {
+        @Override
+        public void onEdit(int modelRow) {
+            // TODO: open New_customer dialog pre-filled with this row's data
+        }
+        @Override
+        public void onDelete(int modelRow) {
+            int confirm = JOptionPane.showConfirmDialog(Customer_management.this,
+                    "Delete this customer?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+            if (confirm == JOptionPane.YES_OPTION) {
+                javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+                model.removeRow(modelRow);
+            }
+        }
+    }));
+    loadCustomers();
+}
+    
+    public void loadCustomers() {
+        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+        model.setRowCount(0);
+
+        String sql = "SELECT full_name, phone_number, loyalty_tier, loyalty_points FROM customers";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String name = rs.getString("full_name");
+                model.addRow(new Object[]{
+                    (name == null || name.isEmpty()) ? "-" : name,
+                    rs.getString("phone_number"),
+                    rs.getString("loyalty_tier"),
+                    rs.getInt("loyalty_points"),
+                    ""
+                });
+            }
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Failed to load customers: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
+
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -51,11 +105,11 @@ public class Customer_management extends javax.swing.JFrame {
                 {null, null, null, null, null}
             },
             new String [] {
-                "NAME", "PHONE", "LOYALTY", "POINTS", "VISITS"
+                "NAME", "PHONE", "LOYALTY", "POINTS", "Action"
             }
         ) {
             Class[] types = new Class [] {
-                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.Integer.class, java.lang.Integer.class
+                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.Integer.class, java.lang.Object.class
             };
 
             public Class getColumnClass(int columnIndex) {

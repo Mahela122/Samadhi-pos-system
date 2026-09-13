@@ -1,0 +1,18 @@
+switch to main branch
+git checkout main
+
+get all file from github
+git pull origin main 
+
+create my branch
+git checkout -b Mahela_Billing_Terminal
+
+Upload fils
+git add .
+
+to commit
+git commit -m "Create Billing Terminal UI"
+
+upload to GitHub
+git push origin Mahela_Billing_Terminal
+

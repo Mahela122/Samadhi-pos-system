@@ -5,6 +5,12 @@
 package GUI;
 
 import javax.swing.JOptionPane;
+import CODE.PasswordUtil;
+import java.sql.SQLIntegrityConstraintViolationException;
+import CODE.Session;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 /**
  *
  * @author tharu
@@ -69,8 +75,6 @@ public class Create_user extends javax.swing.JFrame {
 
         jLabel6.setText("Confirm Password");
 
-        txtconfirm.setText("jPasswordField1");
-
         jLabel7.setText("Role");
 
         btnCashier.setText("Cashier");
@@ -83,8 +87,6 @@ public class Create_user extends javax.swing.JFrame {
                 btnCreateAccActionPerformed(evt);
             }
         });
-
-        txtpassword.setText("jPasswordField1");
 
         javax.swing.GroupLayout jPanel2Layout = new javax.swing.GroupLayout(jPanel2);
         jPanel2.setLayout(jPanel2Layout);
@@ -254,6 +256,35 @@ public class Create_user extends javax.swing.JFrame {
             JOptionPane.showMessageDialog(this,
                 "Please select a role (Cashier or Admin).", "Validation Error",
                 JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        
+        String hashedPassword = PasswordUtil.hash(passwordChars);
+
+        String sql = "INSERT INTO users (username, password_hash, full_name, role, created_by) "
+                   + "VALUES (?, ?, ?, ?, ?)";
+
+        try (Connection conn = CODE.DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, username);
+            pstmt.setString(2, hashedPassword);
+            pstmt.setString(3, fullName);
+            pstmt.setString(4, selectedRole);
+            pstmt.setInt(5, Session.getCurrentUserId());
+
+            pstmt.executeUpdate();
+
+        } catch (SQLIntegrityConstraintViolationException e) {
+            JOptionPane.showMessageDialog(this,
+                "That username is already taken.", "Duplicate Username",
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this,
+                "Database error: " + e.getMessage(), "Error",
+                JOptionPane.ERROR_MESSAGE);
             return;
         }
 
