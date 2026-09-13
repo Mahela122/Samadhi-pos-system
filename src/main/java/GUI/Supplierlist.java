@@ -4,6 +4,7 @@
  */
 package GUI;
 
+import javax.swing.JOptionPane;
 /**
  *
  * @author Minethma
@@ -197,7 +198,7 @@ public class Supplierlist extends javax.swing.JFrame {
                         .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addGap(89, 89, 89)
                         .addComponent(jPanel3, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 57, Short.MAX_VALUE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 55, Short.MAX_VALUE)
                         .addComponent(jPanel4, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
                 .addGap(41, 41, 41))
         );
@@ -231,7 +232,16 @@ public class Supplierlist extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
-        // TODO add your handling code here:
+        try {
+            addEditSupplierForm form = new addEditSupplierForm();
+            form.setLocationRelativeTo(this);
+            form.setVisible(true);
+        } catch (Exception ex) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to open Add Supplier form", ex);
+            JOptionPane.showMessageDialog(this,
+                "Unable to open the Add Supplier form:\n" + ex.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }//GEN-LAST:event_jButton1ActionPerformed
 
     /**

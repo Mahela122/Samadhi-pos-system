@@ -38,6 +38,37 @@ public class Inventory_and_product_management extends javax.swing.JFrame {
                 }
             }
         }));
+        loadProducts();
+    }
+    
+    public void loadProducts() {
+        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+        model.setRowCount(0);
+
+        String sql = "SELECT p.product_id, p.product_name, p.sku, i.quantity_on_hand, i.reorder_level, p.unit_price "
+                   + "FROM products p "
+                   + "JOIN inventory i ON p.product_id = i.product_id "
+                   + "WHERE p.status = 'Active'";
+
+        try (java.sql.Connection conn = CODE.DBConnection.getConnection();
+             java.sql.PreparedStatement pstmt = conn.prepareStatement(sql);
+             java.sql.ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                model.addRow(new Object[]{
+                    rs.getString("product_name"),
+                    rs.getString("sku"),
+                    rs.getInt("quantity_on_hand"),
+                    rs.getInt("reorder_level"),
+                    rs.getDouble("unit_price"),
+                    ""
+                });
+            }
+        } catch (java.sql.SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load products", e);
+            JOptionPane.showMessageDialog(this, "Failed to load products: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     /**
@@ -160,13 +191,6 @@ public class Inventory_and_product_management extends javax.swing.JFrame {
     /**
      * @param args the command line arguments
      */
-    /**
-     * Adds a new product row to the JTable catalog
-     */
-    public void addProductToTable(String name, String sku, int stock, int reorderLevel, double price) {
-        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
-        model.addRow(new Object[]{ name, sku, stock, reorderLevel, price, "" });
-    }
     
     public static void main(String args[]) {
         /* Set the Nimbus look and feel */
