@@ -247,84 +247,141 @@ public class Add_Product extends javax.swing.JDialog {
     }//GEN-LAST:event_lblStockActionPerformed
 
     private void btnSaveActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSaveActionPerformed
-        try {
-            // 1. Retrieve text inputs
-            String productName = lblProduct.getText().trim();
-            String sku = lblSKU.getText().trim();
-            String priceText = lblPrice.getText().trim();
-            String stockText = lblStock.getText().trim();
-            String reorderText = lblReorder.getText().trim();
+        
+    try {
+        // 1. Retrieve text inputs
+        String productName = lblProduct.getText().trim();
+        String sku = lblSKU.getText().trim();
+        String priceText = lblPrice.getText().trim();
+        String stockText = lblStock.getText().trim();
+        String reorderText = lblReorder.getText().trim();
 
-            // 2. Validate empty fields
-            if (productName.isEmpty() || sku.isEmpty() || priceText.isEmpty() || stockText.isEmpty() || reorderText.isEmpty()) {
-                throw new IllegalArgumentException("All fields are required. Please complete all inputs.");
-            }
-
-            // 3. Validate Product Name (Letters and spaces only)
-            if (!productName.matches("[a-zA-Z0-9\\s.,'-]+")) {
-                throw new IllegalArgumentException("Product Name contains invalid characters.");
-            }
-
-            // 4. Validate Price
-            double price;
-            try {
-                price = Double.parseDouble(priceText);
-                if (price < 0) {
-                    throw new IllegalArgumentException("Price cannot be negative.");
-                }
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Price must be a valid number.");
-            }
-
-            // 5. Validate Stock
-            int stock;
-            try {
-                stock = Integer.parseInt(stockText);
-                if (stock < 0) {
-                    throw new IllegalArgumentException("Initial Stock cannot be negative.");
-                }
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Initial Stock must be a whole number.");
-            }
-
-            // 6. Validate Reorder Level
-            int reorderLevel;
-            try {
-                reorderLevel = Integer.parseInt(reorderText);
-                if (reorderLevel < 0) {
-                    throw new IllegalArgumentException("Reorder Level cannot be negative.");
-                }
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Reorder Level must be a whole number.");
-            }
-            
-            // 6b. Validate Category (mandatory)
-            String selectedCategory = (String) cmbCategory.getSelectedItem();
-            if (selectedCategory == null) {
-                throw new IllegalArgumentException("Please select a category.");
-            }
-            int categoryId = categoryMap.get(selectedCategory);
-
-            // 7. Update parent JTable if parent is instance of Inventory_and_product_management
-            if (getParent() instanceof Inventory_and_product_management) {
-                Inventory_and_product_management parentFrame = (Inventory_and_product_management) getParent();
-                parentFrame.addProductToTable(productName, sku, stock, reorderLevel, price);
-            }
-
-            // 8. Success alert and close dialog
-            javax.swing.JOptionPane.showMessageDialog(this, 
-                    "Product added to table successfully!", 
-                    "Success", 
-                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
-            
-            this.dispose(); // Close dialog
-
-        } catch (IllegalArgumentException ex) {
-            javax.swing.JOptionPane.showMessageDialog(this, 
-                    ex.getMessage(), 
-                    "Validation Error", 
-                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        // 2. Validate empty fields
+        if (productName.isEmpty() || sku.isEmpty() || priceText.isEmpty() || stockText.isEmpty() || reorderText.isEmpty()) {
+            throw new IllegalArgumentException("All fields are required. Please complete all inputs.");
         }
+
+        // 3. Validate Product Name
+        if (!productName.matches("[a-zA-Z0-9\\s.,'-]+")) {
+            throw new IllegalArgumentException("Product Name contains invalid characters.");
+        }
+
+        // 4. Validate Price
+        double price;
+        try {
+            price = Double.parseDouble(priceText);
+            if (price < 0) throw new IllegalArgumentException("Price cannot be negative.");
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Price must be a valid number.");
+        }
+
+        // 5. Validate Stock
+        int stock;
+        try {
+            stock = Integer.parseInt(stockText);
+            if (stock < 0) throw new IllegalArgumentException("Initial Stock cannot be negative.");
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Initial Stock must be a whole number.");
+        }
+
+        // 6. Validate Reorder Level
+        int reorderLevel;
+        try {
+            reorderLevel = Integer.parseInt(reorderText);
+            if (reorderLevel < 0) throw new IllegalArgumentException("Reorder Level cannot be negative.");
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Reorder Level must be a whole number.");
+        }
+
+        // 6b. Validate Category (mandatory)
+        String selectedCategory = (String) cmbCategory.getSelectedItem();
+        if (selectedCategory == null) {
+            throw new IllegalArgumentException("Please select a category.");
+        }
+        int categoryId = categoryMap.get(selectedCategory);
+
+        // 6c. Resolve Supplier (optional — "None" means NULL)
+        String selectedSupplier = (String) cmbSupplier.getSelectedItem();
+        Integer supplierId = (selectedSupplier == null || selectedSupplier.equals("None"))
+                ? null
+                : supplierMap.get(selectedSupplier);
+
+        // 7. Insert into products + inventory in a single transaction
+        java.sql.Connection conn = null;
+        try {
+            conn = CODE.DBConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            String insertProduct = "INSERT INTO products (category_id, supplier_id, product_name, sku, unit_price, unit_of_measure, status) "
+                                  + "VALUES (?, ?, ?, ?, ?, 'piece', 'Active')";
+            int newProductId;
+
+            try (java.sql.PreparedStatement pstmt = conn.prepareStatement(insertProduct, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+                pstmt.setInt(1, categoryId);
+                if (supplierId == null) {
+                    pstmt.setNull(2, java.sql.Types.INTEGER);
+                } else {
+                    pstmt.setInt(2, supplierId);
+                }
+                pstmt.setString(3, productName);
+                pstmt.setString(4, sku);
+                pstmt.setDouble(5, price);
+                pstmt.executeUpdate();
+
+                try (java.sql.ResultSet keys = pstmt.getGeneratedKeys()) {
+                    if (keys.next()) {
+                        newProductId = keys.getInt(1);
+                    } else {
+                        throw new java.sql.SQLException("Failed to retrieve generated product ID.");
+                    }
+                }
+            }
+
+            String insertInventory = "INSERT INTO inventory (product_id, quantity_on_hand, reorder_level, last_restocked_at) "
+                                    + "VALUES (?, ?, ?, NOW())";
+            try (java.sql.PreparedStatement pstmt = conn.prepareStatement(insertInventory)) {
+                pstmt.setInt(1, newProductId);
+                pstmt.setInt(2, stock);
+                pstmt.setInt(3, reorderLevel);
+                pstmt.executeUpdate();
+            }
+
+            conn.commit();
+
+            if (getParent() instanceof Inventory_and_product_management) {
+                ((Inventory_and_product_management) getParent()).loadProducts();
+            }
+
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Product added successfully!", "Success",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            this.dispose();
+
+        } catch (java.sql.SQLIntegrityConstraintViolationException dupEx) {
+            if (conn != null) try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "A product with this SKU already exists.", "Duplicate SKU",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } catch (java.sql.SQLException dbEx) {
+            if (conn != null) try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
+            logger.log(java.util.logging.Level.SEVERE, "Error saving product", dbEx);
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Database error: " + dbEx.getMessage(), "Error",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } finally {
+            if (conn != null) {
+                try { conn.setAutoCommit(true); conn.close(); } catch (java.sql.SQLException ignored) {}
+            }
+        }
+
+    } catch (IllegalArgumentException ex) {
+        javax.swing.JOptionPane.showMessageDialog(this,
+                ex.getMessage(),
+                "Validation Error",
+                javax.swing.JOptionPane.ERROR_MESSAGE);
+    }
+
+          
     }//GEN-LAST:event_btnSaveActionPerformed
 
     /**

@@ -9,11 +9,14 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
 import javax.swing.JOptionPane;
+import CODE.DBConnection;
 /**
  *
  * @author tharu
  */
 public class New_customer extends javax.swing.JDialog {
+
+    private Customer_management parentFrame;   // ← ADD THIS FIELD
 
     /**
      * Creates new form New_customer
@@ -21,6 +24,9 @@ public class New_customer extends javax.swing.JDialog {
     public New_customer(java.awt.Frame parent, boolean modal) {
         super(parent, modal);
         initComponents();
+        if (parent instanceof Customer_management) {          // ← ADD THIS BLOCK
+            this.parentFrame = (Customer_management) parent;
+        }
         jButton1.addActionListener(evt -> saveCustomer());
     }
 
@@ -134,46 +140,69 @@ public class New_customer extends javax.swing.JDialog {
         pack();
     }// </editor-fold>//GEN-END:initComponents
 
-    private void saveCustomer() {
-        String fullName = jTextField1.getText().trim();
-        String phone = jTextField2.getText().trim();
-        String tier = getSelectedTier();
+        private void saveCustomer() {
+            String fullName = jTextField1.getText().trim();
+            String phone = jTextField2.getText().trim();
+            String tier = getSelectedTier();
 
-        // --- Validation only, no DB yet ---
+            if (phone.isEmpty()) {
+                JOptionPane.showMessageDialog(this,
+                    "Phone number cannot be empty.", "Validation Error",
+                    JOptionPane.WARNING_MESSAGE);
+                jTextField2.requestFocus();
+                return;
+            }
 
-        if (phone.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                "Phone number cannot be empty.", "Validation Error",
-                JOptionPane.WARNING_MESSAGE);
-            jTextField2.requestFocus();
-            return;
+            if (!phone.matches("^0\\d{9}$")) {
+                JOptionPane.showMessageDialog(this,
+                    "Enter a valid 10-digit phone number starting with 0.",
+                    "Validation Error", JOptionPane.WARNING_MESSAGE);
+                jTextField2.requestFocus();
+                return;
+            }
+
+            if (tier == null) {
+                JOptionPane.showMessageDialog(this,
+                    "Please select a starting tier.", "Validation Error",
+                    JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            String sql = "INSERT INTO customers (phone_number, full_name, loyalty_tier, loyalty_points) "
+                       + "VALUES (?, ?, ?, 0)";
+
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+                pstmt.setString(1, phone);
+                if (fullName.isEmpty()) {
+                    pstmt.setNull(2, java.sql.Types.VARCHAR);
+                } else {
+                    pstmt.setString(2, fullName);
+                }
+                pstmt.setString(3, tier);
+
+                pstmt.executeUpdate();
+
+                if (parentFrame != null) {
+                    parentFrame.loadCustomers();
+                }
+
+                JOptionPane.showMessageDialog(this,
+                    "Customer saved successfully.", "Success",
+                    JOptionPane.INFORMATION_MESSAGE);
+                this.dispose();
+
+            } catch (SQLIntegrityConstraintViolationException dupEx) {
+                JOptionPane.showMessageDialog(this,
+                    "A customer with this phone number already exists.", "Duplicate Phone Number",
+                    JOptionPane.ERROR_MESSAGE);
+            } catch (SQLException ex) {
+                JOptionPane.showMessageDialog(this,
+                    "Database error: " + ex.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            }
         }
-
-        if (!phone.matches("^0\\d{9}$")) {
-            JOptionPane.showMessageDialog(this,
-                "Enter a valid 10-digit phone number starting with 0.",
-                "Validation Error", JOptionPane.WARNING_MESSAGE);
-            jTextField2.requestFocus();
-            return;
-        }
-
-        if (tier == null) {
-            JOptionPane.showMessageDialog(this,
-                "Please select a starting tier.", "Validation Error",
-                JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        // --- Placeholder success (no DB save yet) ---
-        JOptionPane.showMessageDialog(this,
-            "Customer details captured (not yet saved to database):\n"
-            + "Name: " + fullName + "\n"
-            + "Phone: " + phone + "\n"
-            + "Tier: " + tier,
-            "Preview", JOptionPane.INFORMATION_MESSAGE);
-
-        // this.dispose(); // uncomment once DB save is wired in
-    }
 
     private String getSelectedTier() {
         if (rbBronze.isSelected()) return "Bronze";
