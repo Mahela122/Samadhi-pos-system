@@ -25,6 +25,8 @@ public class PayementScreen extends javax.swing.JFrame {
     private BigDecimal totalAmount = BigDecimal.ZERO;
     private boolean isCashSelected = true;
     private final PaymentDAO paymentDAO = new PaymentDAO();
+    private OrderReview reviewWindow;   // the Order Review screen (Back returns here)
+    private POS_Billing billingWindow;  // the Billing screen (cleared after a sale)
     /**
      * Creates new form PayementScreen
      */
@@ -33,7 +35,15 @@ public class PayementScreen extends javax.swing.JFrame {
         initComponents();
         AddProduct.setText("Cancel Order");                          // this button now cancels the unpaid order
         AddProduct.setBackground(new java.awt.Color(220, 38, 38));    // red, like the Del buttons
-        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE); // X closes only this window        
+        // X button works the same as Back (removes the unpaid order and returns to Order Review)
+        setDefaultCloseOperation(javax.swing.WindowConstants.DO_NOTHING_ON_CLOSE);
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                goBackToReview();
+            }
+        });
+        CODE.NavBar.addTo(this, "← Back to Order Review", this::goBackToReview);      
         restrictToDigits(AmountTenderedText);//AmountTenderedText
 
         // Recalculate change every time the amount tendered changes
@@ -62,7 +72,37 @@ public class PayementScreen extends javax.swing.JFrame {
     private void loadAmountDue() {
         totalAmount = paymentDAO.readAmountDue(orderId);
         TotalePriceLable.setText("Rs. " + String.format("%,.2f", totalAmount));
+    }    
+    // Called by Order Review so this screen knows where "Back" goes
+    public void setPreviousScreens(OrderReview reviewWindow, POS_Billing billingWindow) {
+        this.reviewWindow = reviewWindow;
+        this.billingWindow = billingWindow;
     }
+
+    // BACK: the order is not paid yet, so remove it and show Order Review again.
+    // When the cashier clicks Confirm Order again, a fresh order is created (no duplicates).
+    private void goBackToReview() {
+        if (orderId != -1) {
+            String sql = "DELETE FROM orders WHERE order_id = ? "
+                       + "AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.order_id = ?)";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setInt(1, orderId);
+                ps.setInt(2, orderId);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                logger.log(java.util.logging.Level.SEVERE, "Failed to remove unpaid order " + orderId, e);
+                JOptionPane.showMessageDialog(this, "Could not go back: " + e.getMessage(),
+                        "Database Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+        }
+        dispose();
+        if (reviewWindow != null) {
+            reviewWindow.setVisible(true);
+        }
+    }        
+
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -341,6 +381,13 @@ public class PayementScreen extends javax.swing.JFrame {
 
             JOptionPane.showMessageDialog(this, "Order #ORD-" + orderId + " was cancelled.");
             dispose();
+
+            if (reviewWindow != null) {
+                reviewWindow.dispose();          // close the hidden Order Review too
+            }
+            if (billingWindow != null) {
+                billingWindow.returnToBilling(); // back to Billing (cart is kept so it can be edited)
+            }
         } catch (SQLException e) {
             logger.log(java.util.logging.Level.SEVERE, "Failed to cancel order " + orderId, e);
             JOptionPane.showMessageDialog(this, "Failed to cancel the order: " + e.getMessage(),
@@ -463,7 +510,16 @@ public class PayementScreen extends javax.swing.JFrame {
         
         awardLoyaltyPoints();
         
-        new ReceiptInvoicePrintout(orderId).setVisible(true);
+        if (reviewWindow != null) {
+            reviewWindow.dispose();          // sale is done, the hidden Order Review is not needed
+        }
+        if (billingWindow != null) {
+            billingWindow.startNewSale();    // empty the cart for the next customer
+        }
+        ReceiptInvoicePrintout receipt = new ReceiptInvoicePrintout(orderId);
+        receipt.setBillingWindow(billingWindow); // so the receipt's Back goes to Billing
+        receipt.setLocationRelativeTo(this);
+        receipt.setVisible(true);
         this.dispose();
     }
     
