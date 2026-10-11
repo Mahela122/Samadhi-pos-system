@@ -21,12 +21,27 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
 
     private int orderId = -1;
     private final ReceiptDAO receiptDAO = new ReceiptDAO();
+    
+    private POS_Billing billingWindow; // Billing screen to return to (can be null)
+
+    public void setBillingWindow(POS_Billing billingWindow) {
+        this.billingWindow = billingWindow;
+    }
+
+    // BACK: close the receipt and bring Billing to the front
+    private void goBackToBilling() {
+        dispose();
+        if (billingWindow != null) {
+            billingWindow.returnToBilling();
+        }
+    }    
 
     /**
      * Creates new form ReceiptInvoicePrintout
      */
     public ReceiptInvoicePrintout() {
         initComponents();
+        CODE.NavBar.addTo(this, "← Back to Billing", this::goBackToBilling);
     }
 
     /**

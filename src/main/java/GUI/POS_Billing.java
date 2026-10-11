@@ -232,6 +232,14 @@ public class POS_Billing extends javax.swing.JFrame {
         jPanel1.revalidate();
         jPanel1.repaint();
     } 
+    // Called after a successful payment: empty the cart so the next customer starts fresh
+    public void startNewSale() {
+        cart.clear();
+        stockByProduct.clear();
+        customerId = null;   // next sale asks for the phone number again
+        refreshCartPanel();
+        refreshGrid();       // reload stock numbers (they went down after the sale)
+    }    
     
 
     // Shows previous paid orders. Pick one to open its receipt (Refund Sale is on the receipt).

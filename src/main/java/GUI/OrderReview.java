@@ -40,6 +40,7 @@ public class OrderReview extends javax.swing.JFrame {
 
     public OrderReview(java.util.List<CODE.OrderDAO.CartItem> cart, int customerId) {
         initComponents();
+        CODE.NavBar.addTo(this, "← Back to Billing", () -> EditOrderBtnActionPerformed(null)); // same as Edit Order
         this.cart = cart;
         this.customerId = customerId;
         populateOrderReview();
@@ -424,8 +425,11 @@ public class OrderReview extends javax.swing.JFrame {
                 return;
             }
 
-            new PayementScreen(orderId).setVisible(true);
-            this.dispose();
+            PayementScreen payment = new PayementScreen(orderId);
+            payment.setPreviousScreens(this, billingWindow); // so Payment's Back button can return here
+            payment.setLocationRelativeTo(this);
+            payment.setVisible(true);
+            this.setVisible(false); // hide (don't close) so Back can show it again
     }//GEN-LAST:event_ConfirmOrderBtnActionPerformed
 
     //Conform order Rules
