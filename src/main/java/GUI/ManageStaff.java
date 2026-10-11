@@ -70,32 +70,23 @@ public class ManageStaff extends javax.swing.JFrame {
     }
 
 
-    // Puts the edit / Del buttons into the "Actions" column
+    // Double-click to edit Full Name, Username, Role, Status. Red cross = delete.
     private void setupActionColumn() {
         Usertable.setModel(new javax.swing.table.DefaultTableModel(
                 new Object[][]{},
-                new String[]{"Staff ID", "Full Name", "Username", "Role", "Created Date", "Status", "Actions"}) {
+                new String[]{"Staff ID", "Full Name", "Username", "Role", "Created Date", "Status", ""}) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == 6;   // only the Actions column can be clicked
+                return column == 1 || column == 2 || column == 3 || column == 5;
             }
         });
 
         Usertable.setRowHeight(32);
-        Usertable.getColumnModel().getColumn(6).setPreferredWidth(140);
-        Usertable.getColumnModel().getColumn(6).setCellRenderer(new CODE.ProductActionRenderer());
-        Usertable.getColumnModel().getColumn(6).setCellEditor(
-            new CODE.ProductActionEditor(new CODE.ProductActionEditor.ProductActions() {
-                @Override
-                public void onEdit(int modelRow) {
-                    editUser(modelRow);
-                }
-
-                @Override
-                public void onDelete(int modelRow) {
-                    deleteUser(modelRow);
-                }
-            }));
+        CODE.TableHelper.useDropDown(Usertable, 3, "Admin", "Cashier");
+        CODE.TableHelper.useDropDown(Usertable, 5, "Active", "Inactive");
+        CODE.TableHelper.onCellEdited(Usertable, this::saveUserEdit, this::loadUsers);
+        CODE.TableHelper.installDeleteColumn(Usertable, 6, this::deleteUser);
+        CODE.TableHelper.addRightClickOption(Usertable, "Change password / edit all details", this::editUser);
     }
     
 
@@ -221,6 +212,52 @@ public class ManageStaff extends javax.swing.JFrame {
         }
     }    
 
+    // INLINE UPDATE: saves the cell that was just edited (Full Name, Username, Role or Status)
+    private boolean saveUserEdit(int modelRow, int column, Object newValue) {
+        int userId = Integer.parseInt(String.valueOf(Usertable.getModel().getValueAt(modelRow, 0)));
+        String value = (newValue == null) ? "" : newValue.toString().trim();
+
+        String dbColumn;   // fixed names only, so it is safe to put in the SQL
+        switch (column) {
+            case 1: dbColumn = "full_name"; break;
+            case 2: dbColumn = "username";  break;
+            case 3: dbColumn = "role";      break;
+            case 5: dbColumn = "status";    break;
+            default: return false;
+        }
+
+        if (value.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "This field can't be empty.",
+                    "Missing Information", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        // Stop the signed-in admin from locking themselves out
+        boolean isMe = (userId == CODE.Session.getCurrentUserId());
+        if (isMe && ((column == 3 && !value.equals("Admin")) || (column == 5 && !value.equals("Active")))) {
+            JOptionPane.showMessageDialog(this,
+                    "You can't remove your own Admin role or deactivate the account you are signed in with.",
+                    "Not Allowed", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "UPDATE users SET " + dbColumn + " = ? WHERE user_id = ?")) {
+            pstmt.setString(1, value);
+            pstmt.setInt(2, userId);
+            pstmt.executeUpdate();
+            return true;
+        } catch (java.sql.SQLIntegrityConstraintViolationException dup) {
+            JOptionPane.showMessageDialog(this, "That username is already taken. Please choose another.",
+                    "Duplicate Username", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to update staff account", e);
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always

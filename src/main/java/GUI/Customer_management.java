@@ -4,8 +4,6 @@
  */
 package GUI;
 
-import CODE.CustomerActionRenderer;
-import CODE.CustomerActionEditor;
 import javax.swing.JOptionPane;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -42,27 +40,35 @@ public class Customer_management extends javax.swing.JFrame {
         jButton1.addActionListener(evt -> searchCustomers());
         jTextField1.addActionListener(evt -> searchCustomers());
 
-        jTable1.getColumn("Action").setCellRenderer(new CustomerActionRenderer());
-        jTable1.getColumn("Action").setCellEditor(new CustomerActionEditor(new CustomerActionEditor.CustomerActions() {
+        // NAME and PHONE can be edited by double-clicking (not in "select customer" mode)
+        jTable1.setModel(new javax.swing.table.DefaultTableModel(
+                new Object[][]{}, new String[]{"NAME", "PHONE", "LOYALTY", "POINTS", ""}) {
             @Override
-            public void onEdit(int modelRow) {
-                stopTableEditing();
-                int customerId = currentCustomerIds.get(modelRow);
-                New_customer dialog = new New_customer(Customer_management.this, true, customerId);
-                dialog.setLocationRelativeTo(Customer_management.this);
-                dialog.setVisible(true); // the table refreshes itself after a successful update
+            public boolean isCellEditable(int row, int column) {
+                return !selectionMode && (column == 0 || column == 1);
             }
-            @Override
-            public void onDelete(int modelRow) {
-                stopTableEditing();
-                int customerId = currentCustomerIds.get(modelRow);
-                int confirm = JOptionPane.showConfirmDialog(Customer_management.this,
-                        "Delete this customer?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
-                if (confirm == JOptionPane.YES_OPTION) {
-                    deleteCustomer(customerId);
-                }
+        });
+
+        // Double-click -> type -> Enter = saved
+        CODE.TableHelper.onCellEdited(jTable1, this::saveCustomerEdit, this::searchCustomers);
+
+        // Red cross = delete
+        CODE.TableHelper.installDeleteColumn(jTable1, 4, modelRow -> {
+            int customerId = currentCustomerIds.get(modelRow);
+            int confirm = JOptionPane.showConfirmDialog(Customer_management.this,
+                    "Delete this customer?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+            if (confirm == JOptionPane.YES_OPTION) {
+                deleteCustomer(customerId);
             }
-        }));
+        });
+
+        // Right-click = full edit form (for details not shown in the table)
+        CODE.TableHelper.addRightClickOption(jTable1, "Edit all details", modelRow -> {
+            int customerId = currentCustomerIds.get(modelRow);
+            New_customer dialog = new New_customer(Customer_management.this, true, customerId);
+            dialog.setLocationRelativeTo(Customer_management.this);
+            dialog.setVisible(true);
+        });
 
         btnSelectCustomer.setVisible(selectionMode);
         btnSelectCustomer.addActionListener(evt -> {
@@ -98,6 +104,7 @@ public class Customer_management extends javax.swing.JFrame {
     }
     
         public void loadCustomers() {
+            CODE.LoyaltyTiers.updateAllCustomers();   // make sure every customer is on the right tier            
             javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
             model.setRowCount(0);
             currentCustomerIds.clear();
@@ -205,6 +212,47 @@ public class Customer_management extends javax.swing.JFrame {
         }
     }
 
+    // INLINE UPDATE: saves the NAME or PHONE cell that was just edited
+    private boolean saveCustomerEdit(int modelRow, int column, Object newValue) {
+        int customerId = currentCustomerIds.get(modelRow);
+        String text = (newValue == null) ? "" : newValue.toString().trim();
+        String sql;
+
+        if (column == 0) {                       // NAME (optional - empty or "-" removes it)
+            if (text.equals("-")) {
+                text = "";
+            }
+            sql = "UPDATE customers SET full_name = ? WHERE customer_id = ?";
+        } else if (column == 1) {                // PHONE (required, 10 digits)
+            if (!text.matches("\\d{10}")) {
+                JOptionPane.showMessageDialog(this, "Phone number must be 10 digits (e.g. 0771234567).",
+                        "Invalid Phone", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            sql = "UPDATE customers SET phone_number = ? WHERE customer_id = ?";
+        } else {
+            return false;                        // other columns can't be edited
+        }
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            if (text.isEmpty()) {
+                pstmt.setNull(1, java.sql.Types.VARCHAR);
+            } else {
+                pstmt.setString(1, text);
+            }
+            pstmt.setInt(2, customerId);
+            pstmt.executeUpdate();
+            return true;
+        } catch (java.sql.SQLIntegrityConstraintViolationException dup) {
+            JOptionPane.showMessageDialog(this, "Another customer already has this phone number.",
+                    "Duplicate Phone", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always

@@ -176,7 +176,8 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
                 ps.setInt(1, orderId);
                 ps.executeUpdate();
             }
-
+            // 5. Move the customer down a tier if they no longer have enough points
+            CODE.LoyaltyTiers.updateCustomerOfOrder(conn, orderId);
             conn.commit();
 
             PaidinfullLabel.setText("REFUNDED");
