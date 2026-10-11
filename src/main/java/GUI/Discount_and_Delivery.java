@@ -45,6 +45,8 @@ public class Discount_and_Delivery extends javax.swing.JFrame {
         if (jTable1.isEditing()) {
             jTable1.getCellEditor().cancelCellEditing();
         }
+        
+        CODE.LoyaltyTiers.updateAllCustomers();   // tier rules may have changed -> re-check every customer        
 
         String sql = "SELECT tier_id, tier_name, min_points, max_points, discount_percentage "
                    + "FROM loyalty_tiers ORDER BY min_points";
@@ -57,16 +59,14 @@ public class Discount_and_Delivery extends javax.swing.JFrame {
             tierIds.clear();
 
             while (rs.next()) {
-                int min = rs.getInt("min_points");
                 Object maxObj = rs.getObject("max_points");
-                Integer max = (maxObj == null) ? null : rs.getInt("max_points");
-                String range = (max == null) ? min + "+" : min + " - " + max + " pts";
 
                 tierIds.add(rs.getInt("tier_id"));
                 model.addRow(new Object[]{
                     rs.getString("tier_name"),
-                    range,
-                    rs.getBigDecimal("discount_percentage") + "%",
+                    rs.getInt("min_points"),
+                    (maxObj == null) ? "" : String.valueOf(rs.getInt("max_points")),   // empty = no upper limit
+                    rs.getBigDecimal("discount_percentage"),
                     null
                 });
             }
@@ -77,34 +77,22 @@ public class Discount_and_Delivery extends javax.swing.JFrame {
     }
     
 
-    // Puts the edit / Del buttons into the "Edit / Delete" column
+    // Double-click MIN POINTS, MAX POINTS or DISCOUNT % to edit. Red cross = delete.
     private void setupTierTable() {
         jTable1.setModel(new DefaultTableModel(
                 new Object[][]{},
-                new String[]{"TIER", "POINT RANGE", "DISCOUNT", "Edit / Delete"}) {
+                new String[]{"TIER", "MIN POINTS", "MAX POINTS", "DISCOUNT %", ""}) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == 3;   // only the button column can be clicked
+                return column == 1 || column == 2 || column == 3;
             }
         });
 
         jTable1.setRowHeight(32);
-        jTable1.getColumnModel().getColumn(3).setPreferredWidth(140);
-        jTable1.getColumnModel().getColumn(3).setCellRenderer(new ProductActionRenderer());
-        jTable1.getColumnModel().getColumn(3).setCellEditor(
-            new ProductActionEditor(new ProductActionEditor.ProductActions() {
-                @Override
-                public void onEdit(int modelRow) {
-                    editTier(modelRow);
-                }
-
-                @Override
-                public void onDelete(int modelRow) {
-                    deleteTier(modelRow);
-                }
-            }));
+        CODE.TableHelper.onCellEdited(jTable1, this::saveTierEdit, this::loadLoyaltyTiers);
+        CODE.TableHelper.installDeleteColumn(jTable1, 4, this::deleteTier);
+        CODE.TableHelper.addRightClickOption(jTable1, "Edit tier (rename)", this::editTier);
     }
-
     // UPDATE - opens the New Tier Rule window in edit mode
     private void editTier(int modelRow) {
         if (modelRow < 0 || modelRow >= tierIds.size()) {
@@ -161,6 +149,59 @@ public class Discount_and_Delivery extends javax.swing.JFrame {
         }
     }
 
+    // INLINE UPDATE: checks the whole row (it already has the new value) and saves it
+    private boolean saveTierEdit(int modelRow, int column, Object newValue) {
+        javax.swing.table.TableModel model = jTable1.getModel();
+        int tierId = tierIds.get(modelRow);
+        int min;
+        Integer max;
+        java.math.BigDecimal discount;
+
+        try {
+            min = Integer.parseInt(String.valueOf(model.getValueAt(modelRow, 1)).trim());
+            String maxText = String.valueOf(model.getValueAt(modelRow, 2)).trim();
+            max = maxText.isEmpty() ? null : Integer.parseInt(maxText);
+            discount = new java.math.BigDecimal(
+                    String.valueOf(model.getValueAt(modelRow, 3)).replace("%", "").trim());
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Please type numbers only (leave MAX POINTS empty for no limit).",
+                    "Invalid Number", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        if (min < 0 || (max != null && max <= min)) {
+            JOptionPane.showMessageDialog(this,
+                    "MIN POINTS must be 0 or more, and MAX POINTS must be bigger than MIN POINTS.",
+                    "Invalid Range", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        if (discount.compareTo(java.math.BigDecimal.ZERO) < 0
+                || discount.compareTo(new java.math.BigDecimal("100")) > 0) {
+            JOptionPane.showMessageDialog(this, "DISCOUNT % must be between 0 and 100.",
+                    "Invalid Discount", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        String sql = "UPDATE loyalty_tiers SET min_points = ?, max_points = ?, discount_percentage = ? "
+                   + "WHERE tier_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, min);
+            if (max == null) {
+                ps.setNull(2, java.sql.Types.INTEGER);
+            } else {
+                ps.setInt(2, max);
+            }
+            ps.setBigDecimal(3, discount);
+            ps.setInt(4, tierId);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always

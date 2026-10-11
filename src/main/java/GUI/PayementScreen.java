@@ -539,6 +539,7 @@ public class PayementScreen extends javax.swing.JFrame {
             ps.setInt(1, points);
             ps.setInt(2, orderId);
             ps.executeUpdate();
+            CODE.LoyaltyTiers.updateCustomerOfOrder(conn, orderId);   // move up a tier if they passed the limit
         } catch (SQLException e) {
             logger.log(java.util.logging.Level.WARNING,
                     "Payment saved but loyalty points not added for order " + orderId, e);

@@ -135,32 +135,23 @@ public class Supplierlist extends javax.swing.JFrame {
     }
     
 
+    // Double-click to edit Name, Contact, Phone, Status. Red cross = delete.
     private void setupActionColumn() {
         jTable1.setModel(new javax.swing.table.DefaultTableModel(
                 new Object[][]{},
-                new String[]{"Supplier Name", "Contact Person", "Phone", "Item Supplied", "Status", "Action"}) {
+                new String[]{"Supplier Name", "Contact Person", "Phone", "Item Supplied", "Status", ""}) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == 5;   // only the Action column can be clicked
+                return column == 0 || column == 1 || column == 2 || column == 4; // Item Supplied is calculated
             }
         });
 
         jTable1.setRowHeight(32);
         jTable1.getColumnModel().getColumn(3).setPreferredWidth(250);   // more room for item names
-        jTable1.getColumnModel().getColumn(5).setPreferredWidth(140);
-        jTable1.getColumnModel().getColumn(5).setCellRenderer(new CODE.ProductActionRenderer());
-        jTable1.getColumnModel().getColumn(5).setCellEditor(
-            new CODE.ProductActionEditor(new CODE.ProductActionEditor.ProductActions() {
-                @Override
-                public void onEdit(int modelRow) {
-                    editSupplier(modelRow);
-                }
-
-                @Override
-                public void onDelete(int modelRow) {
-                    deleteSupplier(modelRow);
-                }
-            }));
+        CODE.TableHelper.useDropDown(jTable1, 4, "Active", "Inactive");
+        CODE.TableHelper.onCellEdited(jTable1, this::saveSupplierEdit, this::loadSuppliers);
+        CODE.TableHelper.installDeleteColumn(jTable1, 5, this::deleteSupplier);
+        CODE.TableHelper.addRightClickOption(jTable1, "Edit all details", this::editSupplier);
     }
 
     // UPDATE - opens the supplier form in edit mode
@@ -202,6 +193,49 @@ public class Supplierlist extends javax.swing.JFrame {
             JOptionPane.showMessageDialog(this, "Failed to delete supplier: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }  
+    
+    // INLINE UPDATE: saves the cell that was just edited
+    private boolean saveSupplierEdit(int modelRow, int column, Object newValue) {
+        int supplierId = supplierIds.get(modelRow);
+        String value = (newValue == null) ? "" : newValue.toString().trim();
+
+        String dbColumn;   // fixed names only, so it is safe to put in the SQL
+        switch (column) {
+            case 0: dbColumn = "supplier_name";  break;
+            case 1: dbColumn = "contact_person"; break;
+            case 2: dbColumn = "phone_number";   break;
+            case 4: dbColumn = "status";         break;
+            default: return false;
+        }
+
+        if (value.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "This field can't be empty.",
+                    "Missing Information", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        if (column == 2 && !value.matches("\\d{10}")) {
+            JOptionPane.showMessageDialog(this, "Phone number must be 10 digits (e.g. 0112345678).",
+                    "Invalid Phone", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "UPDATE suppliers SET " + dbColumn + " = ? WHERE supplier_id = ?")) {
+            pstmt.setString(1, value);
+            pstmt.setInt(2, supplierId);
+            pstmt.executeUpdate();
+            if (column == 4) {
+                updateSummaryCounts();   // the "Active Partners" card changes
+            }
+            return true;
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to update supplier", e);
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
     }    
     /**
      * This method is called from within the constructor to initialize the form.

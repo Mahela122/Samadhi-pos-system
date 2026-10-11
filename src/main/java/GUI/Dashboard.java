@@ -32,6 +32,7 @@ public class Dashboard extends javax.swing.JFrame {
             jButton4.addActionListener(evt -> loadContent(new POS_Billing()));
             jButton6.addActionListener(evt -> loadContent(new Discount_and_Delivery()));
             jButton7.addActionListener(evt -> loadContent(new Inventory_and_product_management()));
+            jButton5.addActionListener(evt -> loadContent(new ReportGeneration())); // Reports button            
             jButton1.addActionListener(evt -> showDashboardHome()); // Dashboard button reloads the stats
             showDashboardHome();    
     }
@@ -248,7 +249,7 @@ public class Dashboard extends javax.swing.JFrame {
         jButton4.setPreferredSize(new java.awt.Dimension(88, 23));
 
         jButton5.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
-        jButton5.setText("Payment");
+        jButton5.setText("Reports");
         jButton5.setMaximumSize(new java.awt.Dimension(88, 23));
         jButton5.setMinimumSize(new java.awt.Dimension(88, 23));
         jButton5.setPreferredSize(new java.awt.Dimension(88, 23));
