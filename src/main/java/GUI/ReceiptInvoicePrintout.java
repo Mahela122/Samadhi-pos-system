@@ -21,6 +21,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
 
     private int orderId = -1;
     private final ReceiptDAO receiptDAO = new ReceiptDAO();
+    private ReceiptDAO.ReceiptHeader header;   // kept so the printed receipt can use it    
     
     private POS_Billing billingWindow; // Billing screen to return to (can be null)
 
@@ -58,7 +59,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
             return;
         }
 
-        ReceiptDAO.ReceiptHeader header = receiptDAO.readReceiptHeader(orderId);
+        header = receiptDAO.readReceiptHeader(orderId);
         if (header == null) {
             logger.log(java.util.logging.Level.WARNING, "No receipt data found for order {0}", orderId);
             JOptionPane.showMessageDialog(this, "Could not load receipt details for this order.",
@@ -197,6 +198,304 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
         }
     }    
 
+    // ===================== PRINT A REAL RECEIPT =====================
+
+    // Shop details printed at the top of every receipt - change these to your real details
+    private static final String SHOP_NAME    = "SAMADHI POOJA BANDA";
+    private static final String SHOP_TAGLINE = "Atapirikara & Pooja Items";
+    private static final String SHOP_ADDRESS = "No. 00, Main Street, Your Town";   // TODO: real address
+    private static final String SHOP_PHONE   = "Tel: 000 000 0000";                // TODO: real phone
+
+    private static final int WRAP_CHARS = 40;   // characters per line for long text (delivery address)
+
+    // Shows the print dialog and prints the receipt
+    private void printReceipt() {
+        if (header == null) {
+            JOptionPane.showMessageDialog(this, "There is no receipt loaded to print.",
+                    "Print", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        java.util.List<String[]> lines = buildReceiptLines();
+
+        java.awt.print.PrinterJob job = java.awt.print.PrinterJob.getPrinterJob();
+        job.setJobName("Receipt ORD-" + orderId);
+        job.setPrintable((graphics, pageFormat, pageIndex) -> {
+            if (pageIndex > 0) {
+                return java.awt.print.Printable.NO_SUCH_PAGE;   // the receipt is always one page
+            }
+            drawReceipt((java.awt.Graphics2D) graphics, pageFormat, lines);
+            return java.awt.print.Printable.PAGE_EXISTS;
+        });
+
+        if (!job.printDialog()) {
+            JOptionPane.showMessageDialog(this, "Printing was cancelled.",
+                    "Print", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        try {
+            job.print();
+        } catch (java.awt.print.PrinterException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to print receipt", e);
+            JOptionPane.showMessageDialog(this, "Could not print receipt: " + e.getMessage(),
+                    "Print Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // Collects everything that goes on the receipt, one line at a time.
+    // Each line is {type, left text, right text}.
+    // Types: TITLE, CENTER, NOTICE, HEAD, ROW, TOTAL, LINE (dashed line), GAP (small space)
+    private java.util.List<String[]> buildReceiptLines() {
+        java.util.List<String[]> lines = new java.util.ArrayList<>();
+
+        // Customer, loyalty and delivery details for this order
+        String customerName = "-";
+        String customerPhone = "-";
+        String tier = "-";
+        int pointsBalance = 0;
+        String deliveryAddress = null;
+
+        String sql = "SELECT COALESCE(NULLIF(c.full_name, ''), '-') AS customer_name, c.phone_number, "
+                   + "COALESCE(c.loyalty_tier, '-') AS tier, c.loyalty_points, d.delivery_address "
+                   + "FROM orders o "
+                   + "JOIN customers c ON c.customer_id = o.customer_id "
+                   + "LEFT JOIN deliveries d ON d.order_id = o.order_id "
+                   + "WHERE o.order_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, orderId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    customerName = rs.getString("customer_name");
+                    customerPhone = rs.getString("phone_number");
+                    tier = rs.getString("tier");
+                    pointsBalance = rs.getInt("loyalty_points");
+                    deliveryAddress = rs.getString("delivery_address");
+                }
+            }
+        } catch (SQLException e) {
+            // still print the receipt, just without the customer details
+            logger.log(java.util.logging.Level.WARNING, "Could not load customer details for receipt", e);
+        }
+
+        boolean refunded = "REFUNDED".equals(PaidinfullLabel.getText());
+
+        // ---- Shop header ----
+        lines.add(new String[]{"TITLE", SHOP_NAME, null});
+        lines.add(new String[]{"CENTER", SHOP_TAGLINE, null});
+        lines.add(new String[]{"CENTER", SHOP_ADDRESS, null});
+        lines.add(new String[]{"CENTER", SHOP_PHONE, null});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Order details ----
+        lines.add(new String[]{"ROW", "Receipt No:", "#ORD-" + orderId});
+        lines.add(new String[]{"ROW", "Date:", Date.getText()});
+        lines.add(new String[]{"ROW", "Cashier:", header.cashierName});
+        lines.add(new String[]{"ROW", "Customer:", customerName});
+        lines.add(new String[]{"ROW", "Phone:", customerPhone});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Items: name + line total, then "qty x unit price" underneath ----
+        lines.add(new String[]{"HEAD", "ITEM", "AMOUNT (Rs.)"});
+        javax.swing.table.TableModel items = jTable1.getModel();
+        for (int r = 0; r < items.getRowCount(); r++) {
+            Object name = items.getValueAt(r, 0);
+            if (name == null) {
+                continue;   // skip empty rows
+            }
+            Object amount = items.getValueAt(r, 2);
+            double qty = toDouble(items.getValueAt(r, 1));
+
+            lines.add(new String[]{"ROW", name.toString(), money(amount)});
+            if (qty > 0) {
+                lines.add(new String[]{"ROW", "   " + (int) qty + " x " + money(toDouble(amount) / qty), null});
+            }
+        }
+
+        // ---- Totals ----
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"ROW", "Subtotal", "Rs. " + money(header.subtotal)});
+        if (toDouble(header.discount) > 0) {
+            lines.add(new String[]{"ROW", "Loyalty Discount", "- Rs. " + money(header.discount)});
+        }
+        lines.add(new String[]{"TOTAL", "TOTAL", "Rs. " + money(header.total)});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Payment ----
+        lines.add(new String[]{"ROW", "Payment Method:", header.paymentMethod});
+        if ("Cash".equals(header.paymentMethod)) {
+            lines.add(new String[]{"ROW", "Cash Received:", "Rs. " + money(header.amountPaid)});
+            lines.add(new String[]{"ROW", "Change:", "Rs. " + money(header.amountPaid.subtract(header.total))});
+        }
+        if (refunded) {
+            lines.add(new String[]{"GAP", null, null});
+            lines.add(new String[]{"NOTICE", "*** REFUNDED ***", null});
+        }
+
+        // ---- Delivery address (only for delivery orders) ----
+        if (deliveryAddress != null && !deliveryAddress.trim().isEmpty()) {
+            lines.add(new String[]{"LINE", null, null});
+            lines.add(new String[]{"HEAD", "Deliver To:", null});
+            for (String part : wrap(deliveryAddress.trim(), WRAP_CHARS)) {
+                lines.add(new String[]{"ROW", part, null});
+            }
+        }
+
+        // ---- Loyalty ----
+        int pointsEarned = refunded ? 0 : (int) (toDouble(header.total) / 100);   // 1 point per Rs. 100
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"ROW", "Loyalty Tier:", tier});
+        lines.add(new String[]{"ROW", "Points Earned:", String.valueOf(pointsEarned)});
+        lines.add(new String[]{"ROW", "Points Balance:", String.valueOf(pointsBalance)});
+
+        // ---- Footer ----
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"NOTICE", "Thank you for shopping with us!", null});
+        lines.add(new String[]{"CENTER", "Please keep this receipt for returns.", null});
+        lines.add(new String[]{"CENTER", "Come again!", null});
+        return lines;
+    }
+
+    // Draws the receipt lines as a narrow strip (about 80 mm wide) in the middle of the page
+    private void drawReceipt(java.awt.Graphics2D g, java.awt.print.PageFormat pf, java.util.List<String[]> lines) {
+        java.awt.Font titleFont  = new java.awt.Font("SansSerif", java.awt.Font.BOLD, 15);
+        java.awt.Font normalFont = new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 9);
+        java.awt.Font boldFont   = new java.awt.Font("Monospaced", java.awt.Font.BOLD, 9);
+        java.awt.Font totalFont  = new java.awt.Font("Monospaced", java.awt.Font.BOLD, 12);
+
+        double width = Math.min(pf.getImageableWidth(), 226);   // 226 points = 80 mm receipt paper
+
+        // Total height needed - shrink everything if it is taller than the page
+        double height = 0;
+        for (String[] line : lines) {
+            height += lineHeight(line[0]);
+        }
+        double scale = Math.min(1.0, pf.getImageableHeight() / height);
+
+        g.translate(pf.getImageableX() + (pf.getImageableWidth() - width * scale) / 2, pf.getImageableY());
+        g.scale(scale, scale);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setColor(java.awt.Color.BLACK);
+
+        float y = 0;
+        for (String[] line : lines) {
+            String type = line[0];
+            y += lineHeight(type);
+
+            switch (type) {
+                case "TITLE":
+                    drawCentered(g, titleFont, line[1], width, y);
+                    break;
+                case "CENTER":
+                    drawCentered(g, normalFont, line[1], width, y);
+                    break;
+                case "NOTICE":
+                    drawCentered(g, boldFont, line[1], width, y);
+                    break;
+                case "HEAD":
+                    drawLeftRight(g, boldFont, line[1], line[2], width, y);
+                    break;
+                case "ROW":
+                    drawLeftRight(g, normalFont, line[1], line[2], width, y);
+                    break;
+                case "TOTAL":
+                    drawLeftRight(g, totalFont, line[1], line[2], width, y);
+                    break;
+                case "LINE":
+                    g.setStroke(new java.awt.BasicStroke(0.6f, java.awt.BasicStroke.CAP_BUTT,
+                            java.awt.BasicStroke.JOIN_MITER, 10f, new float[]{2f, 2f}, 0f));   // dashed
+                    g.draw(new java.awt.geom.Line2D.Double(0, y - 4, width, y - 4));
+                    break;
+                default:   // GAP = empty space
+                    break;
+            }
+        }
+    }
+
+    // How tall each type of line is (in points)
+    private static int lineHeight(String type) {
+        switch (type) {
+            case "TITLE": return 22;
+            case "TOTAL": return 18;
+            case "LINE":  return 10;
+            case "GAP":   return 6;
+            default:      return 13;
+        }
+    }
+
+    private static void drawCentered(java.awt.Graphics2D g, java.awt.Font font, String text, double width, float y) {
+        g.setFont(font);
+        String shown = fit(g.getFontMetrics(), text, width);
+        int textWidth = g.getFontMetrics().stringWidth(shown);
+        g.drawString(shown, (float) ((width - textWidth) / 2), y);
+    }
+
+    // Left text at the left edge, right text at the right edge (left is shortened if they would overlap)
+    private static void drawLeftRight(java.awt.Graphics2D g, java.awt.Font font, String left, String right,
+                                      double width, float y) {
+        g.setFont(font);
+        java.awt.FontMetrics fm = g.getFontMetrics();
+        int rightWidth = 0;
+        if (right != null) {
+            rightWidth = fm.stringWidth(right);
+            g.drawString(right, (float) (width - rightWidth), y);
+        }
+        if (left != null) {
+            double space = width - rightWidth - (right != null ? fm.charWidth(' ') * 2 : 0);
+            g.drawString(fit(fm, left, space), 0f, y);
+        }
+    }
+
+    // Cuts text and adds ".." if it is too wide
+    private static String fit(java.awt.FontMetrics fm, String text, double maxWidth) {
+        if (text == null) {
+            return "";
+        }
+        if (fm.stringWidth(text) <= maxWidth) {
+            return text;
+        }
+        while (text.length() > 0 && fm.stringWidth(text + "..") > maxWidth) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text + "..";
+    }
+
+    // Splits long text into lines of at most maxChars characters (breaks at spaces)
+    private static java.util.List<String> wrap(String text, int maxChars) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        StringBuilder line = new StringBuilder();
+        for (String word : text.split("\\s+")) {
+            if (line.length() > 0 && line.length() + 1 + word.length() > maxChars) {
+                result.add(line.toString());
+                line.setLength(0);
+            }
+            if (line.length() > 0) {
+                line.append(' ');
+            }
+            line.append(word);
+        }
+        if (line.length() > 0) {
+            result.add(line.toString());
+        }
+        return result;
+    }
+
+    // Formats any number as 1,250.00
+    private static String money(Object value) {
+        return String.format("%,.2f", toDouble(value));
+    }
+
+    // Turns a table/DB value into a number (works for BigDecimal, Double, Integer or text like "1,250.00")
+    private static double toDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value).replace(",", "").replace("Rs.", "").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -547,17 +846,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
-        try {
-            boolean complete = jTable1.print();
-            if (!complete) {
-                JOptionPane.showMessageDialog(this, "Printing was cancelled.",
-                        "Print", JOptionPane.INFORMATION_MESSAGE);
-            }
-        } catch (java.awt.print.PrinterException e) {
-            logger.log(java.util.logging.Level.SEVERE, "Failed to print receipt", e);
-            JOptionPane.showMessageDialog(this, "Could not print receipt: " + e.getMessage(),
-                    "Print Error", JOptionPane.ERROR_MESSAGE);
-        }
+        printReceipt();
     }//GEN-LAST:event_jButton1ActionPerformed
 
     private void RefundBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_RefundBtnActionPerformed
