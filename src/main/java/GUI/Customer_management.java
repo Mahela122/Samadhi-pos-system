@@ -10,6 +10,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import CODE.DBConnection;
+import java.awt.*;
+import javax.swing.*;
 /**
  *
  * @author tharu
@@ -33,6 +35,7 @@ public class Customer_management extends javax.swing.JFrame {
 
     public Customer_management(boolean selectionMode, java.util.function.Consumer<Integer> onCustomerSelected) {
         initComponents();
+        fixLayout();
         this.selectionMode = selectionMode;
         this.onCustomerSelected = onCustomerSelected;
         jTable1.setRowHeight(40);
@@ -344,12 +347,12 @@ public class Customer_management extends javax.swing.JFrame {
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(59, 59, 59)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(71, 71, 71)
+                        .addGap(44, 44, 44)
                         .addComponent(btnadd, javax.swing.GroupLayout.PREFERRED_SIZE, 36, javax.swing.GroupLayout.PREFERRED_SIZE))
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(27, 27, 27)
                         .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 51, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addComponent(jLabel2)))
@@ -358,7 +361,7 @@ public class Customer_management extends javax.swing.JFrame {
                     .addComponent(jTextField1)
                     .addComponent(jButton1, javax.swing.GroupLayout.DEFAULT_SIZE, 36, Short.MAX_VALUE))
                 .addGap(18, 18, 18)
-                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 436, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 404, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(18, 18, 18)
                 .addComponent(btnSelectCustomer, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(16, 16, 16))
@@ -378,6 +381,51 @@ public class Customer_management extends javax.swing.JFrame {
         pack();
     }// </editor-fold>//GEN-END:initComponents
 
+    private void fixLayout() {
+        // title + subtitle on the left
+        JPanel titles = new JPanel(new GridLayout(2, 1));
+        titles.setOpaque(false);
+        titles.add(jLabel1);
+        titles.add(jLabel2);
+
+        // New Customer button on the right
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+        header.add(titles, BorderLayout.WEST);
+        btnadd.setPreferredSize(new Dimension(220, 42));
+        JPanel addBox = new JPanel();
+        addBox.setOpaque(false);
+        addBox.add(btnadd);
+        header.add(addBox, BorderLayout.EAST);
+
+        // search box + Search button, normal height
+        jTextField1.setPreferredSize(new Dimension(300, 38));
+        jButton1.setPreferredSize(new Dimension(130, 38));
+        JPanel searchRow = new JPanel(new BorderLayout(12, 0));
+        searchRow.setOpaque(false);
+        searchRow.add(jTextField1, BorderLayout.CENTER);
+        searchRow.add(jButton1, BorderLayout.EAST);
+
+        JPanel top = new JPanel(new BorderLayout(0, 18));
+        top.setOpaque(false);
+        top.add(header, BorderLayout.NORTH);
+        top.add(searchRow, BorderLayout.SOUTH);
+
+        // table fills the rest, white background
+        jTable1.setFillsViewportHeight(true);
+        jScrollPane1.getViewport().setBackground(Color.WHITE);
+
+        // put it all together
+        jPanel1.removeAll();
+        jPanel1.setLayout(new BorderLayout(0, 18));
+        jPanel1.setBorder(BorderFactory.createEmptyBorder(20, 30, 20, 30));
+        jPanel1.add(top, BorderLayout.NORTH);
+        jPanel1.add(jScrollPane1, BorderLayout.CENTER);
+        jPanel1.add(btnSelectCustomer, BorderLayout.SOUTH);
+        jPanel1.setPreferredSize(new Dimension(900, 600));
+        pack();
+    }    
+    
      private void openNewCustomerDialog() {
         New_customer dialog = new New_customer(this, true);
         dialog.setLocationRelativeTo(this);

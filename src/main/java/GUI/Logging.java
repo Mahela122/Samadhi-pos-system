@@ -12,6 +12,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import javax.swing.JOptionPane;
+import java.awt.*;
+import javax.swing.*;
 
 /**
  *
@@ -24,6 +26,7 @@ public class Logging extends javax.swing.JFrame {
      */
     public Logging() {
         initComponents();
+        fixLayout();
         
         btnCreate.setVisible(false);
         jLabel6.setVisible(false);
@@ -31,6 +34,47 @@ public class Logging extends javax.swing.JFrame {
         btnSignin.addActionListener(evt -> handleSignIn());
     }
 
+    private void fixLayout() {
+        // 1. put the white card in the centre
+        jPanel1.removeAll();
+        jPanel1.setLayout(new GridBagLayout());
+        jPanel1.add(jPanel2);
+
+        // 2. line up everything inside the card
+        jPanel2.removeAll();
+        jPanel2.setLayout(new GridBagLayout());
+        jPanel2.setBorder(BorderFactory.createEmptyBorder(35, 45, 35, 45));
+        jLabel1.setHorizontalAlignment(SwingConstants.CENTER);
+        jLabel5.setHorizontalAlignment(SwingConstants.CENTER);
+        lblUsername.setPreferredSize(new Dimension(400, 36));
+        lblPassword.setPreferredSize(new Dimension(400, 36));
+        btnSignin.setPreferredSize(new Dimension(400, 44));
+
+        addRow(jLabel1, 0, 25);      // shop name
+        addRow(jLabel2, 1, 20);      // Staff Login
+        addRow(jLabel3, 2, 6);       // Username
+        addRow(lblUsername, 3, 16);
+        addRow(jLabel4, 4, 6);       // Password
+        addRow(lblPassword, 5, 24);
+        addRow(btnSignin, 6, 25);
+        addRow(jLabel5, 7, 0);       // Role Base Access
+
+        // 3. open full screen on any computer
+        setBounds(GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds());
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
+    }
+
+    // adds one item to the card, on its own row, with a gap below it
+    private void addRow(Component comp, int row, int gapBelow) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.weightx = 1;
+        c.insets = new Insets(0, 0, gapBelow, 0);
+        jPanel2.add(comp, c);
+    }
+    
     private void handleSignIn() {
         String username = lblUsername.getText().trim();
         char[] passwordChars = lblPassword.getPassword();

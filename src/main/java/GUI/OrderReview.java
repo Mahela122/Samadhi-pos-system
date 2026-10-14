@@ -413,7 +413,7 @@ public class OrderReview extends javax.swing.JFrame {
             }
 
             // TODO: replace hardcoded currentUserId once Session.currentUserId is wired here
-            int currentUserId = 8;
+            int currentUserId = CODE.Session.getCurrentUserId();
 
             int orderId = orderDAO.createOrder(customerId, currentUserId, cart,
                     computedLoyaltyDiscount, selectedFulfillmentMode);
