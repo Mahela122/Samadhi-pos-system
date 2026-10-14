@@ -12,7 +12,7 @@ import java.sql.SQLException;
 import javax.swing.JOptionPane;
 /**
  *
- * @author User
+ * @author abeyrathnamahela
  */
 public class ManageStaff extends javax.swing.JFrame {
     
@@ -156,8 +156,6 @@ public class ManageStaff extends javax.swing.JFrame {
     }
 
     // DELETE - removes a staff account.
-    // If the person has already processed orders, MySQL blocks the delete
-    // (orders.user_id needs them), so we offer to make the account Inactive instead.
     private void deleteUser(int modelRow) {
         int userId = Integer.parseInt(String.valueOf(Usertable.getModel().getValueAt(modelRow, 0)));
         String name = String.valueOf(Usertable.getModel().getValueAt(modelRow, 1));
@@ -197,7 +195,7 @@ public class ManageStaff extends javax.swing.JFrame {
         loadUsers();   // refresh the table
     }
 
-    // Soft delete - the account stays (for the sales records) but can't sign in
+    // Soft delete - the account stays but can't sign in
     private void deactivateUser(int userId) {
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(

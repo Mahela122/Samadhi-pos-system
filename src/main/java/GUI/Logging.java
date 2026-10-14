@@ -17,7 +17,7 @@ import javax.swing.*;
 
 /**
  *
- * @author tharu
+ * @author abeyrathnamahela
  */
 public class Logging extends javax.swing.JFrame {
 
