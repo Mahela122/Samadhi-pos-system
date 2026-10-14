@@ -13,22 +13,20 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 /**
  *
- * @author tharu
+ * @author abeyrathnamahela
  */
 public class Create_user extends javax.swing.JFrame {
     
     private String selectedRole = null;
-    private ManageStaff parentList = null;   // staff list to refresh after saving (null = opened from login)
-    private Integer editUserId = null;       // null = create new account, a number = editing that account
+    private ManageStaff parentList = null;   
+    private Integer editUserId = null;      
     private String currentStatus = "Active";    
-    /**
-     * Creates new form Create_user
-     */
+    
     public Create_user() {
-        this(null, null);   // opened from the login screen
+        this(null, null);  
     }
 
-    // CREATE mode - "+ Create Account" on Manage Staff
+    //"+ Create Account" on Manage Staff
     public Create_user(ManageStaff parentList) {
         this(parentList, null);
     }
@@ -57,7 +55,7 @@ public class Create_user extends javax.swing.JFrame {
         }
     }
 
-    // Fills the form with the staff member's current details (edit mode)
+    // Fills the form with the staff member's current details
     private void loadUser(int userId) {
         String sql = "SELECT full_name, username, role, status FROM users WHERE user_id = ?";
         try (Connection conn = CODE.DBConnection.getConnection();
