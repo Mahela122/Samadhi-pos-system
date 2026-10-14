@@ -21,6 +21,10 @@ public class Dashboard extends javax.swing.JFrame {
      */
     public Dashboard() {
         initComponents();
+        jPanel1.setPreferredSize(null);
+        jPanel2.setPreferredSize(null);
+        setBounds(java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds());
+        setExtendedState(javax.swing.JFrame.MAXIMIZED_BOTH);
 
         btnManageStaff.setVisible(Session.isAdmin());
         btnManageStaff.addActionListener(evt -> loadContent(new ManageStaff()));
@@ -41,7 +45,9 @@ public class Dashboard extends javax.swing.JFrame {
         jPanel2.removeAll();
         jPanel2.setLayout(new java.awt.BorderLayout());
         jPanel2.add(CODE.NavBar.create("← Back to Dashboard", this::showDashboardHome), java.awt.BorderLayout.NORTH);        
-        jPanel2.add(moduleFrame.getContentPane(), java.awt.BorderLayout.CENTER);
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(moduleFrame.getContentPane());
+        scroll.setBorder(null);
+        jPanel2.add(scroll, java.awt.BorderLayout.CENTER);
         jPanel2.revalidate();
         jPanel2.repaint();
     }
