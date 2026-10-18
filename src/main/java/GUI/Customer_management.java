@@ -4,74 +4,258 @@
  */
 package GUI;
 
-import CODE.CustomerActionRenderer;
-import CODE.CustomerActionEditor;
 import javax.swing.JOptionPane;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import CODE.DBConnection;
+import java.awt.*;
+import javax.swing.*;
 /**
  *
  * @author tharu
  */
 public class Customer_management extends javax.swing.JFrame {
 
+    
+    private boolean selectionMode;
+    private final java.util.List<Integer> currentCustomerIds = new java.util.ArrayList<>();
+    private java.util.function.Consumer<Integer> onCustomerSelected;
     /**
      * Creates new form Customer_management
      */
     public Customer_management() {
-    initComponents();
-    jTable1.setRowHeight(40);
-    btnadd.addActionListener(evt -> openNewCustomerDialog());
+        this(false, null);
+    }
 
-    jTable1.getColumn("Action").setCellRenderer(new CustomerActionRenderer());
-    jTable1.getColumn("Action").setCellEditor(new CustomerActionEditor(new CustomerActionEditor.CustomerActions() {
-        @Override
-        public void onEdit(int modelRow) {
-            // TODO: open New_customer dialog pre-filled with this row's data
-        }
-        @Override
-        public void onDelete(int modelRow) {
+    public Customer_management(boolean selectionMode) {
+        this(selectionMode, null);
+    }
+
+    public Customer_management(boolean selectionMode, java.util.function.Consumer<Integer> onCustomerSelected) {
+        initComponents();
+        fixLayout();
+        this.selectionMode = selectionMode;
+        this.onCustomerSelected = onCustomerSelected;
+        jTable1.setRowHeight(40);
+        btnadd.addActionListener(evt -> openNewCustomerDialog());
+        jButton1.addActionListener(evt -> searchCustomers());
+        jTextField1.addActionListener(evt -> searchCustomers());
+
+        // NAME and PHONE can be edited by double-clicking (not in "select customer" mode)
+        jTable1.setModel(new javax.swing.table.DefaultTableModel(
+                new Object[][]{}, new String[]{"NAME", "PHONE", "LOYALTY", "POINTS", ""}) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return !selectionMode && (column == 0 || column == 1);
+            }
+        });
+
+        // Double-click -> type -> Enter = saved
+        CODE.TableHelper.onCellEdited(jTable1, this::saveCustomerEdit, this::searchCustomers);
+
+        // Red cross = delete
+        CODE.TableHelper.installDeleteColumn(jTable1, 4, modelRow -> {
+            int customerId = currentCustomerIds.get(modelRow);
             int confirm = JOptionPane.showConfirmDialog(Customer_management.this,
                     "Delete this customer?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
             if (confirm == JOptionPane.YES_OPTION) {
-                javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
-                model.removeRow(modelRow);
+                deleteCustomer(customerId);
+            }
+        });
+
+        // Right-click = full edit form (for details not shown in the table)
+        CODE.TableHelper.addRightClickOption(jTable1, "Edit all details", modelRow -> {
+            int customerId = currentCustomerIds.get(modelRow);
+            New_customer dialog = new New_customer(Customer_management.this, true, customerId);
+            dialog.setLocationRelativeTo(Customer_management.this);
+            dialog.setVisible(true);
+        });
+
+        btnSelectCustomer.setVisible(selectionMode);
+        btnSelectCustomer.addActionListener(evt -> {
+            int row = jTable1.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(this, "Please select a customer from the table first.",
+                        "No Customer Selected", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            int customerId = currentCustomerIds.get(row);
+            openBillingForCustomer(customerId);
+        });
+
+        if (selectionMode) {
+            jTable1.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent evt) {
+                    if (evt.getClickCount() != 2) {
+                        return; // require double-click so a normal single click still just selects the row
+                    }
+                    int row = jTable1.rowAtPoint(evt.getPoint());
+                    int col = jTable1.columnAtPoint(evt.getPoint());
+                    if (row < 0 || col == 4) {
+                        return; // column 4 is "Action" — let its own Edit/Delete buttons handle that click
+                    }
+                    int customerId = currentCustomerIds.get(row);
+                    openBillingForCustomer(customerId);
+                }
+            });
+        }
+
+        loadCustomers();
+    }
+    
+        public void loadCustomers() {
+            CODE.LoyaltyTiers.updateAllCustomers();   // make sure every customer is on the right tier            
+            javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+            model.setRowCount(0);
+            currentCustomerIds.clear();
+
+            String sql = "SELECT customer_id, full_name, phone_number, loyalty_tier, loyalty_points FROM customers";
+
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql);
+                 ResultSet rs = pstmt.executeQuery()) {
+
+                while (rs.next()) {
+                    String name = rs.getString("full_name");
+                    model.addRow(new Object[]{
+                        (name == null || name.isEmpty()) ? "-" : name,
+                        rs.getString("phone_number"),
+                        rs.getString("loyalty_tier"),
+                        rs.getInt("loyalty_points"),
+                        ""
+                    });
+                    currentCustomerIds.add(rs.getInt("customer_id"));
+                }
+            } catch (SQLException e) {
+                JOptionPane.showMessageDialog(this, "Failed to load customers: " + e.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
-    }));
-    loadCustomers();
-}
-    
-    public void loadCustomers() {
-        javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
-        model.setRowCount(0);
-
-        String sql = "SELECT full_name, phone_number, loyalty_tier, loyalty_points FROM customers";
-
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-
-            while (rs.next()) {
-                String name = rs.getString("full_name");
-                model.addRow(new Object[]{
-                    (name == null || name.isEmpty()) ? "-" : name,
-                    rs.getString("phone_number"),
-                    rs.getString("loyalty_tier"),
-                    rs.getInt("loyalty_points"),
-                    ""
-                });
+        
+        
+        private void searchCustomers() {
+            String term = jTextField1.getText().trim();
+            if (term.isEmpty()) {
+                loadCustomers();
+                return;
             }
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Failed to load customers: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+
+            javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
+            model.setRowCount(0);
+            currentCustomerIds.clear();
+
+            String sql = "SELECT customer_id, full_name, phone_number, loyalty_tier, loyalty_points "
+                       + "FROM customers WHERE phone_number LIKE ? OR full_name LIKE ?";
+
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                String likeTerm = "%" + term + "%";
+                pstmt.setString(1, likeTerm);
+                pstmt.setString(2, likeTerm);
+
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        String name = rs.getString("full_name");
+                        model.addRow(new Object[]{
+                            (name == null || name.isEmpty()) ? "-" : name,
+                            rs.getString("phone_number"),
+                            rs.getString("loyalty_tier"),
+                            rs.getInt("loyalty_points"),
+                            ""
+                        });
+                        currentCustomerIds.add(rs.getInt("customer_id"));
+                    }
+                }
+            } catch (SQLException e) {
+                JOptionPane.showMessageDialog(this, "Search failed: " + e.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+
+        private void openBillingForCustomer(int customerId) {
+            if (onCustomerSelected != null) {
+                onCustomerSelected.accept(customerId);
+            } else {
+                new POS_Billing(customerId).setVisible(true);
+                this.dispose();
+            }
+        }
+    // Makes sure the Edit/Delete button cell is no longer "being edited" before the table changes
+    private void stopTableEditing() {
+        if (jTable1.isEditing()) {
+            jTable1.getCellEditor().stopCellEditing();
         }
     }
 
+    // DELETE: removes the customer from the database (only allowed if they have no orders)
+    private void deleteCustomer(int customerId) {
+        String sql = "DELETE FROM customers WHERE customer_id = ?";
 
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, customerId);
+            pstmt.executeUpdate();
+
+            JOptionPane.showMessageDialog(this, "Customer deleted successfully.",
+                    "Deleted", JOptionPane.INFORMATION_MESSAGE);
+            searchCustomers(); // refresh the table (keeps the current search text, if any)
+
+        } catch (java.sql.SQLIntegrityConstraintViolationException fkEx) {
+            // orders.customer_id is ON DELETE RESTRICT, so MySQL blocks deleting customers with orders
+            JOptionPane.showMessageDialog(this,
+                    "This customer has past orders, so they can't be deleted.\n"
+                  + "Their order history must be kept for sales records and reports.",
+                    "Cannot Delete Customer", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Failed to delete customer: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // INLINE UPDATE: saves the NAME or PHONE cell that was just edited
+    private boolean saveCustomerEdit(int modelRow, int column, Object newValue) {
+        int customerId = currentCustomerIds.get(modelRow);
+        String text = (newValue == null) ? "" : newValue.toString().trim();
+        String sql;
+
+        if (column == 0) {                       // NAME (optional - empty or "-" removes it)
+            if (text.equals("-")) {
+                text = "";
+            }
+            sql = "UPDATE customers SET full_name = ? WHERE customer_id = ?";
+        } else if (column == 1) {                // PHONE (required, 10 digits)
+            if (!text.matches("\\d{10}")) {
+                JOptionPane.showMessageDialog(this, "Phone number must be 10 digits (e.g. 0771234567).",
+                        "Invalid Phone", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            sql = "UPDATE customers SET phone_number = ? WHERE customer_id = ?";
+        } else {
+            return false;                        // other columns can't be edited
+        }
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            if (text.isEmpty()) {
+                pstmt.setNull(1, java.sql.Types.VARCHAR);
+            } else {
+                pstmt.setString(1, text);
+            }
+            pstmt.setInt(2, customerId);
+            pstmt.executeUpdate();
+            return true;
+        } catch (java.sql.SQLIntegrityConstraintViolationException dup) {
+            JOptionPane.showMessageDialog(this, "Another customer already has this phone number.",
+                    "Duplicate Phone", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -87,13 +271,21 @@ public class Customer_management extends javax.swing.JFrame {
         jScrollPane1 = new javax.swing.JScrollPane();
         jTable1 = new javax.swing.JTable();
         btnadd = new javax.swing.JButton();
+        jTextField1 = new javax.swing.JTextField();
+        jButton1 = new javax.swing.JButton();
+        btnSelectCustomer = new javax.swing.JButton();
 
-        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
+        jPanel1.setBackground(new java.awt.Color(246, 245, 242));
+
+        jLabel1.setFont(new java.awt.Font("Segoe UI", 1, 24)); // NOI18N
         jLabel1.setText("CUSTOMER MANAGEMENT");
 
         jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         jLabel2.setText("Customer Directory");
+
+        jScrollPane1.setBackground(new java.awt.Color(255, 255, 255));
 
         jTable1.setModel(new javax.swing.table.DefaultTableModel(
             new Object [][] {
@@ -118,9 +310,14 @@ public class Customer_management extends javax.swing.JFrame {
         });
         jScrollPane1.setViewportView(jTable1);
 
-        btnadd.setBackground(new java.awt.Color(0, 152, 51));
+        btnadd.setBackground(new java.awt.Color(11, 107, 109));
+        btnadd.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         btnadd.setForeground(new java.awt.Color(255, 255, 255));
         btnadd.setText("+   New Customer");
+
+        jButton1.setText("Search");
+
+        btnSelectCustomer.setText("Select Customer");
 
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
@@ -130,31 +327,44 @@ public class Customer_management extends javax.swing.JFrame {
                 .addGap(24, 24, 24)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 1120, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addContainerGap(56, Short.MAX_VALUE))
-                    .addGroup(jPanel1Layout.createSequentialGroup()
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(jLabel1)
-                            .addComponent(jLabel2))
+                            .addComponent(jLabel2)
+                            .addComponent(jLabel1))
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(btnadd, javax.swing.GroupLayout.PREFERRED_SIZE, 137, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(78, 78, 78))))
+                        .addComponent(btnadd)
+                        .addGap(78, 78, 78))
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                            .addComponent(btnSelectCustomer, javax.swing.GroupLayout.PREFERRED_SIZE, 194, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 1120, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addGroup(jPanel1Layout.createSequentialGroup()
+                                    .addComponent(jTextField1, javax.swing.GroupLayout.PREFERRED_SIZE, 952, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addGap(18, 18, 18)
+                                    .addComponent(jButton1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
+                        .addContainerGap(56, Short.MAX_VALUE))))
         );
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(59, 59, 59)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(71, 71, 71)
+                        .addGap(44, 44, 44)
                         .addComponent(btnadd, javax.swing.GroupLayout.PREFERRED_SIZE, 36, javax.swing.GroupLayout.PREFERRED_SIZE))
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(62, 62, 62)
-                        .addComponent(jLabel1)
+                        .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 51, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addComponent(jLabel2)))
-                .addGap(24, 24, 24)
-                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 436, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(131, Short.MAX_VALUE))
+                .addGap(27, 27, 27)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jTextField1)
+                    .addComponent(jButton1, javax.swing.GroupLayout.DEFAULT_SIZE, 36, Short.MAX_VALUE))
+                .addGap(18, 18, 18)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 404, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(18, 18, 18)
+                .addComponent(btnSelectCustomer, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(16, 16, 16))
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -171,6 +381,51 @@ public class Customer_management extends javax.swing.JFrame {
         pack();
     }// </editor-fold>//GEN-END:initComponents
 
+    private void fixLayout() {
+        // title + subtitle on the left
+        JPanel titles = new JPanel(new GridLayout(2, 1));
+        titles.setOpaque(false);
+        titles.add(jLabel1);
+        titles.add(jLabel2);
+
+        // New Customer button on the right
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+        header.add(titles, BorderLayout.WEST);
+        btnadd.setPreferredSize(new Dimension(220, 42));
+        JPanel addBox = new JPanel();
+        addBox.setOpaque(false);
+        addBox.add(btnadd);
+        header.add(addBox, BorderLayout.EAST);
+
+        // search box + Search button, normal height
+        jTextField1.setPreferredSize(new Dimension(300, 38));
+        jButton1.setPreferredSize(new Dimension(130, 38));
+        JPanel searchRow = new JPanel(new BorderLayout(12, 0));
+        searchRow.setOpaque(false);
+        searchRow.add(jTextField1, BorderLayout.CENTER);
+        searchRow.add(jButton1, BorderLayout.EAST);
+
+        JPanel top = new JPanel(new BorderLayout(0, 18));
+        top.setOpaque(false);
+        top.add(header, BorderLayout.NORTH);
+        top.add(searchRow, BorderLayout.SOUTH);
+
+        // table fills the rest, white background
+        jTable1.setFillsViewportHeight(true);
+        jScrollPane1.getViewport().setBackground(Color.WHITE);
+
+        // put it all together
+        jPanel1.removeAll();
+        jPanel1.setLayout(new BorderLayout(0, 18));
+        jPanel1.setBorder(BorderFactory.createEmptyBorder(20, 30, 20, 30));
+        jPanel1.add(top, BorderLayout.NORTH);
+        jPanel1.add(jScrollPane1, BorderLayout.CENTER);
+        jPanel1.add(btnSelectCustomer, BorderLayout.SOUTH);
+        jPanel1.setPreferredSize(new Dimension(900, 600));
+        pack();
+    }    
+    
      private void openNewCustomerDialog() {
         New_customer dialog = new New_customer(this, true);
         dialog.setLocationRelativeTo(this);
@@ -212,11 +467,14 @@ public class Customer_management extends javax.swing.JFrame {
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JButton btnSelectCustomer;
     private javax.swing.JButton btnadd;
+    private javax.swing.JButton jButton1;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JScrollPane jScrollPane1;
     private javax.swing.JTable jTable1;
+    private javax.swing.JTextField jTextField1;
     // End of variables declaration//GEN-END:variables
 }

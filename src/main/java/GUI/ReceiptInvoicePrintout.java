@@ -4,21 +4,498 @@
  */
 package GUI;
 
+import CODE.ReceiptDAO;
+import javax.swing.JOptionPane;
+import javax.swing.table.DefaultTableModel;
+import CODE.DBConnection;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 /**
  *
  * @author User
  */
 public class ReceiptInvoicePrintout extends javax.swing.JFrame {
     
-    private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(ReceiptInvoicePrintout.class.getName());
+        private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(ReceiptInvoicePrintout.class.getName());
+
+    private int orderId = -1;
+    private final ReceiptDAO receiptDAO = new ReceiptDAO();
+    private ReceiptDAO.ReceiptHeader header;   // kept so the printed receipt can use it    
+    
+    private POS_Billing billingWindow; // Billing screen to return to (can be null)
+
+    public void setBillingWindow(POS_Billing billingWindow) {
+        this.billingWindow = billingWindow;
+    }
+
+    // BACK: close the receipt and bring Billing to the front
+    private void goBackToBilling() {
+        dispose();
+        if (billingWindow != null) {
+            billingWindow.returnToBilling();
+        }
+    }    
 
     /**
      * Creates new form ReceiptInvoicePrintout
      */
     public ReceiptInvoicePrintout() {
         initComponents();
+        CODE.NavBar.addTo(this, "← Back to Billing", this::goBackToBilling);
     }
 
+    /**
+     * Opens the receipt for a specific order and loads its data.
+     */
+    public ReceiptInvoicePrintout(int orderId) {
+        this();
+        this.orderId = orderId;
+        loadReceipt();
+    }
+
+    private void loadReceipt() {
+        if (orderId == -1) {
+            return;
+        }
+
+        header = receiptDAO.readReceiptHeader(orderId);
+        if (header == null) {
+            logger.log(java.util.logging.Level.WARNING, "No receipt data found for order {0}", orderId);
+            JOptionPane.showMessageDialog(this, "Could not load receipt details for this order.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        ReciptId.setText("#ORD-" + orderId);
+
+        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a");
+        String formattedDate = header.orderDate != null ? sdf.format(header.orderDate) : "-";
+        Date.setText(formattedDate);
+        DateAndTime.setText(formattedDate);
+
+        Cashier.setText(header.cashierName);
+        Subtotal.setText("Rs. " + String.format("%,.2f", header.subtotal));
+        Discount.setText("Rs. " + String.format("%,.2f", header.discount));
+        Total.setText("Rs. " + String.format("%,.2f", header.total));
+        PaymentMethod.setText(header.paymentMethod);
+        PaidinfullLabel.setText("Paid in full");
+
+        if ("Cash".equals(header.paymentMethod)) {
+            java.math.BigDecimal change = header.amountPaid.subtract(header.total);
+            ShowBalance.setText("Cash received · Rs. " + String.format("%,.2f", header.amountPaid)
+                    + " · Change Rs. " + String.format("%,.2f", change));
+        } else {
+            ShowBalance.setText("Paid by Card · Rs. " + String.format("%,.2f", header.amountPaid));
+        }
+
+        Object[][] items = receiptDAO.readReceiptItems(orderId);
+        DefaultTableModel model = (DefaultTableModel) jTable1.getModel();
+        model.setRowCount(0);
+        for (Object[] row : items) {
+            model.addRow(row);
+        }
+        showRefundStatus();     
+    }
+    
+
+    // If this sale was already refunded, show it and turn off the Refund button
+    private void showRefundStatus() {
+        String sql = "SELECT payment_status FROM payments WHERE order_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, orderId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                if (rs.next() && "Refunded".equals(rs.getString("payment_status"))) {
+                    PaidinfullLabel.setText("REFUNDED");
+                    RefundBtn.setEnabled(false);
+                }
+            }
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.WARNING, "Could not check refund status for order " + orderId, e);
+        }
+    }    
+
+    // UPDATE - refunds this sale. In one transaction:
+    // payment -> Refunded, order -> Cancelled, stock is put back, loyalty points are taken back.
+    // Either all 4 changes are saved, or none of them are.
+    private void refundSale() {
+        if (orderId == -1) {
+            return;
+        }
+
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Refund order #ORD-" + orderId + "?\nThe stock will be put back and the order will be cancelled.",
+                "Refund Sale", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        Connection conn = null;
+        try {
+            conn = DBConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            // 1. Payment -> Refunded (only if it is still Success)
+            int rows;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE payments SET payment_status = 'Refunded' "
+                  + "WHERE order_id = ? AND payment_status = 'Success'")) {
+                ps.setInt(1, orderId);
+                rows = ps.executeUpdate();
+            }
+            if (rows == 0) {
+                conn.rollback();
+                JOptionPane.showMessageDialog(this, "This sale has already been refunded.",
+                        "Refund Sale", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // 2. Order -> Refunded
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE orders SET order_status = 'Refunded' WHERE order_id = ?")) {
+                ps.setInt(1, orderId);
+                ps.executeUpdate();
+            }
+
+            // 3. Put the sold items back into stock
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE inventory i "
+                  + "JOIN order_items oi ON oi.product_id = i.product_id "
+                  + "SET i.quantity_on_hand = i.quantity_on_hand + oi.quantity "
+                  + "WHERE oi.order_id = ?")) {
+                ps.setInt(1, orderId);
+                ps.executeUpdate();
+            }
+
+            // 4. Take back the loyalty points (1 point per Rs. 100), never below 0
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE customers c "
+                  + "JOIN orders o ON o.customer_id = c.customer_id "
+                  + "SET c.loyalty_points = GREATEST(c.loyalty_points - FLOOR(o.total_amount / 100), 0) "
+                  + "WHERE o.order_id = ?")) {
+                ps.setInt(1, orderId);
+                ps.executeUpdate();
+            }
+            // 5. Move the customer down a tier if they no longer have enough points
+            CODE.LoyaltyTiers.updateCustomerOfOrder(conn, orderId);
+            conn.commit();
+
+            PaidinfullLabel.setText("REFUNDED");
+            RefundBtn.setEnabled(false);
+            JOptionPane.showMessageDialog(this, "Sale refunded. The stock has been put back.",
+                    "Refund Sale", JOptionPane.INFORMATION_MESSAGE);
+
+        } catch (SQLException e) {
+            if (conn != null) try { conn.rollback(); } catch (SQLException ignored) {}
+            logger.log(java.util.logging.Level.SEVERE, "Failed to refund order " + orderId, e);
+            JOptionPane.showMessageDialog(this, "Refund failed. Nothing was changed.\n" + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        } finally {
+            if (conn != null) {
+                try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {}
+            }
+        }
+    }    
+
+    // ===================== PRINT A REAL RECEIPT =====================
+
+    // Shop details printed at the top of every receipt - change these to your real details
+    private static final String SHOP_NAME    = "SAMADHI POOJA BANDA";
+    private static final String SHOP_TAGLINE = "Atapirikara & Pooja Items";
+    private static final String SHOP_ADDRESS = "No. 00, Main Street, Your Town";   // TODO: real address
+    private static final String SHOP_PHONE   = "Tel: 000 000 0000";                // TODO: real phone
+
+    private static final int WRAP_CHARS = 40;   // characters per line for long text (delivery address)
+
+    // Shows the print dialog and prints the receipt
+    private void printReceipt() {
+        if (header == null) {
+            JOptionPane.showMessageDialog(this, "There is no receipt loaded to print.",
+                    "Print", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        java.util.List<String[]> lines = buildReceiptLines();
+
+        java.awt.print.PrinterJob job = java.awt.print.PrinterJob.getPrinterJob();
+        job.setJobName("Receipt ORD-" + orderId);
+        job.setPrintable((graphics, pageFormat, pageIndex) -> {
+            if (pageIndex > 0) {
+                return java.awt.print.Printable.NO_SUCH_PAGE;   // the receipt is always one page
+            }
+            drawReceipt((java.awt.Graphics2D) graphics, pageFormat, lines);
+            return java.awt.print.Printable.PAGE_EXISTS;
+        });
+
+        if (!job.printDialog()) {
+            JOptionPane.showMessageDialog(this, "Printing was cancelled.",
+                    "Print", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        try {
+            job.print();
+        } catch (java.awt.print.PrinterException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to print receipt", e);
+            JOptionPane.showMessageDialog(this, "Could not print receipt: " + e.getMessage(),
+                    "Print Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // Collects everything that goes on the receipt, one line at a time.
+    // Each line is {type, left text, right text}.
+    // Types: TITLE, CENTER, NOTICE, HEAD, ROW, TOTAL, LINE (dashed line), GAP (small space)
+    private java.util.List<String[]> buildReceiptLines() {
+        java.util.List<String[]> lines = new java.util.ArrayList<>();
+
+        // Customer, loyalty and delivery details for this order
+        String customerName = "-";
+        String customerPhone = "-";
+        String tier = "-";
+        int pointsBalance = 0;
+        String deliveryAddress = null;
+
+        String sql = "SELECT COALESCE(NULLIF(c.full_name, ''), '-') AS customer_name, c.phone_number, "
+                   + "COALESCE(c.loyalty_tier, '-') AS tier, c.loyalty_points, d.delivery_address "
+                   + "FROM orders o "
+                   + "JOIN customers c ON c.customer_id = o.customer_id "
+                   + "LEFT JOIN deliveries d ON d.order_id = o.order_id "
+                   + "WHERE o.order_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, orderId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    customerName = rs.getString("customer_name");
+                    customerPhone = rs.getString("phone_number");
+                    tier = rs.getString("tier");
+                    pointsBalance = rs.getInt("loyalty_points");
+                    deliveryAddress = rs.getString("delivery_address");
+                }
+            }
+        } catch (SQLException e) {
+            // still print the receipt, just without the customer details
+            logger.log(java.util.logging.Level.WARNING, "Could not load customer details for receipt", e);
+        }
+
+        boolean refunded = "REFUNDED".equals(PaidinfullLabel.getText());
+
+        // ---- Shop header ----
+        lines.add(new String[]{"TITLE", SHOP_NAME, null});
+        lines.add(new String[]{"CENTER", SHOP_TAGLINE, null});
+        lines.add(new String[]{"CENTER", SHOP_ADDRESS, null});
+        lines.add(new String[]{"CENTER", SHOP_PHONE, null});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Order details ----
+        lines.add(new String[]{"ROW", "Receipt No:", "#ORD-" + orderId});
+        lines.add(new String[]{"ROW", "Date:", Date.getText()});
+        lines.add(new String[]{"ROW", "Cashier:", header.cashierName});
+        lines.add(new String[]{"ROW", "Customer:", customerName});
+        lines.add(new String[]{"ROW", "Phone:", customerPhone});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Items: name + line total, then "qty x unit price" underneath ----
+        lines.add(new String[]{"HEAD", "ITEM", "AMOUNT (Rs.)"});
+        javax.swing.table.TableModel items = jTable1.getModel();
+        for (int r = 0; r < items.getRowCount(); r++) {
+            Object name = items.getValueAt(r, 0);
+            if (name == null) {
+                continue;   // skip empty rows
+            }
+            Object amount = items.getValueAt(r, 2);
+            double qty = toDouble(items.getValueAt(r, 1));
+
+            lines.add(new String[]{"ROW", name.toString(), money(amount)});
+            if (qty > 0) {
+                lines.add(new String[]{"ROW", "   " + (int) qty + " x " + money(toDouble(amount) / qty), null});
+            }
+        }
+
+        // ---- Totals ----
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"ROW", "Subtotal", "Rs. " + money(header.subtotal)});
+        if (toDouble(header.discount) > 0) {
+            lines.add(new String[]{"ROW", "Loyalty Discount", "- Rs. " + money(header.discount)});
+        }
+        lines.add(new String[]{"TOTAL", "TOTAL", "Rs. " + money(header.total)});
+        lines.add(new String[]{"LINE", null, null});
+
+        // ---- Payment ----
+        lines.add(new String[]{"ROW", "Payment Method:", header.paymentMethod});
+        if ("Cash".equals(header.paymentMethod)) {
+            lines.add(new String[]{"ROW", "Cash Received:", "Rs. " + money(header.amountPaid)});
+            lines.add(new String[]{"ROW", "Change:", "Rs. " + money(header.amountPaid.subtract(header.total))});
+        }
+        if (refunded) {
+            lines.add(new String[]{"GAP", null, null});
+            lines.add(new String[]{"NOTICE", "*** REFUNDED ***", null});
+        }
+
+        // ---- Delivery address (only for delivery orders) ----
+        if (deliveryAddress != null && !deliveryAddress.trim().isEmpty()) {
+            lines.add(new String[]{"LINE", null, null});
+            lines.add(new String[]{"HEAD", "Deliver To:", null});
+            for (String part : wrap(deliveryAddress.trim(), WRAP_CHARS)) {
+                lines.add(new String[]{"ROW", part, null});
+            }
+        }
+
+        // ---- Loyalty ----
+        int pointsEarned = refunded ? 0 : (int) (toDouble(header.total) / 100);   // 1 point per Rs. 100
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"ROW", "Loyalty Tier:", tier});
+        lines.add(new String[]{"ROW", "Points Earned:", String.valueOf(pointsEarned)});
+        lines.add(new String[]{"ROW", "Points Balance:", String.valueOf(pointsBalance)});
+
+        // ---- Footer ----
+        lines.add(new String[]{"LINE", null, null});
+        lines.add(new String[]{"NOTICE", "Thank you for shopping with us!", null});
+        lines.add(new String[]{"CENTER", "Please keep this receipt for returns.", null});
+        lines.add(new String[]{"CENTER", "Come again!", null});
+        return lines;
+    }
+
+    // Draws the receipt lines as a narrow strip (about 80 mm wide) in the middle of the page
+    private void drawReceipt(java.awt.Graphics2D g, java.awt.print.PageFormat pf, java.util.List<String[]> lines) {
+        java.awt.Font titleFont  = new java.awt.Font("SansSerif", java.awt.Font.BOLD, 15);
+        java.awt.Font normalFont = new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 9);
+        java.awt.Font boldFont   = new java.awt.Font("Monospaced", java.awt.Font.BOLD, 9);
+        java.awt.Font totalFont  = new java.awt.Font("Monospaced", java.awt.Font.BOLD, 12);
+
+        double width = Math.min(pf.getImageableWidth(), 226);   // 226 points = 80 mm receipt paper
+
+        // Total height needed - shrink everything if it is taller than the page
+        double height = 0;
+        for (String[] line : lines) {
+            height += lineHeight(line[0]);
+        }
+        double scale = Math.min(1.0, pf.getImageableHeight() / height);
+
+        g.translate(pf.getImageableX() + (pf.getImageableWidth() - width * scale) / 2, pf.getImageableY());
+        g.scale(scale, scale);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setColor(java.awt.Color.BLACK);
+
+        float y = 0;
+        for (String[] line : lines) {
+            String type = line[0];
+            y += lineHeight(type);
+
+            switch (type) {
+                case "TITLE":
+                    drawCentered(g, titleFont, line[1], width, y);
+                    break;
+                case "CENTER":
+                    drawCentered(g, normalFont, line[1], width, y);
+                    break;
+                case "NOTICE":
+                    drawCentered(g, boldFont, line[1], width, y);
+                    break;
+                case "HEAD":
+                    drawLeftRight(g, boldFont, line[1], line[2], width, y);
+                    break;
+                case "ROW":
+                    drawLeftRight(g, normalFont, line[1], line[2], width, y);
+                    break;
+                case "TOTAL":
+                    drawLeftRight(g, totalFont, line[1], line[2], width, y);
+                    break;
+                case "LINE":
+                    g.setStroke(new java.awt.BasicStroke(0.6f, java.awt.BasicStroke.CAP_BUTT,
+                            java.awt.BasicStroke.JOIN_MITER, 10f, new float[]{2f, 2f}, 0f));   // dashed
+                    g.draw(new java.awt.geom.Line2D.Double(0, y - 4, width, y - 4));
+                    break;
+                default:   // GAP = empty space
+                    break;
+            }
+        }
+    }
+
+    // How tall each type of line is (in points)
+    private static int lineHeight(String type) {
+        switch (type) {
+            case "TITLE": return 22;
+            case "TOTAL": return 18;
+            case "LINE":  return 10;
+            case "GAP":   return 6;
+            default:      return 13;
+        }
+    }
+
+    private static void drawCentered(java.awt.Graphics2D g, java.awt.Font font, String text, double width, float y) {
+        g.setFont(font);
+        String shown = fit(g.getFontMetrics(), text, width);
+        int textWidth = g.getFontMetrics().stringWidth(shown);
+        g.drawString(shown, (float) ((width - textWidth) / 2), y);
+    }
+
+    // Left text at the left edge, right text at the right edge (left is shortened if they would overlap)
+    private static void drawLeftRight(java.awt.Graphics2D g, java.awt.Font font, String left, String right,
+                                      double width, float y) {
+        g.setFont(font);
+        java.awt.FontMetrics fm = g.getFontMetrics();
+        int rightWidth = 0;
+        if (right != null) {
+            rightWidth = fm.stringWidth(right);
+            g.drawString(right, (float) (width - rightWidth), y);
+        }
+        if (left != null) {
+            double space = width - rightWidth - (right != null ? fm.charWidth(' ') * 2 : 0);
+            g.drawString(fit(fm, left, space), 0f, y);
+        }
+    }
+
+    // Cuts text and adds ".." if it is too wide
+    private static String fit(java.awt.FontMetrics fm, String text, double maxWidth) {
+        if (text == null) {
+            return "";
+        }
+        if (fm.stringWidth(text) <= maxWidth) {
+            return text;
+        }
+        while (text.length() > 0 && fm.stringWidth(text + "..") > maxWidth) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text + "..";
+    }
+
+    // Splits long text into lines of at most maxChars characters (breaks at spaces)
+    private static java.util.List<String> wrap(String text, int maxChars) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        StringBuilder line = new StringBuilder();
+        for (String word : text.split("\\s+")) {
+            if (line.length() > 0 && line.length() + 1 + word.length() > maxChars) {
+                result.add(line.toString());
+                line.setLength(0);
+            }
+            if (line.length() > 0) {
+                line.append(' ');
+            }
+            line.append(word);
+        }
+        if (line.length() > 0) {
+            result.add(line.toString());
+        }
+        return result;
+    }
+
+    // Formats any number as 1,250.00
+    private static String money(Object value) {
+        return String.format("%,.2f", toDouble(value));
+    }
+
+    // Turns a table/DB value into a number (works for BigDecimal, Double, Integer or text like "1,250.00")
+    private static double toDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value).replace(",", "").replace("Rs.", "").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -40,6 +517,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
         ShowBalance = new javax.swing.JLabel();
         PaidinfullLabel = new javax.swing.JLabel();
         jButton1 = new javax.swing.JButton();
+        RefundBtn = new javax.swing.JButton();
         jPanel6 = new javax.swing.JPanel();
         jLabel2 = new javax.swing.JLabel();
         ReceiptLabel = new javax.swing.JLabel();
@@ -60,7 +538,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
         PaymentMethodLabel = new javax.swing.JLabel();
         PaymentMethod = new javax.swing.JLabel();
 
-        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
         jPanel1.setBackground(new java.awt.Color(244, 246, 245));
 
@@ -106,9 +584,14 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
 
         PaidinfullLabel.setText("Paid in full");
 
+        jButton1.setBackground(new java.awt.Color(20, 92, 82));
         jButton1.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        jButton1.setForeground(new java.awt.Color(255, 255, 255));
         jButton1.setText("Print receipt");
         jButton1.addActionListener(this::jButton1ActionPerformed);
+
+        RefundBtn.setText("Refund Sale");
+        RefundBtn.addActionListener(this::RefundBtnActionPerformed);
 
         javax.swing.GroupLayout jPanel4Layout = new javax.swing.GroupLayout(jPanel4);
         jPanel4.setLayout(jPanel4Layout);
@@ -121,8 +604,11 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
                     .addComponent(ShowBalance)
                     .addComponent(ISSUEDlabel)
                     .addComponent(DateAndTime, javax.swing.GroupLayout.PREFERRED_SIZE, 93, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 173, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addContainerGap(234, Short.MAX_VALUE))
+                    .addGroup(jPanel4Layout.createSequentialGroup()
+                        .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 173, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(RefundBtn, javax.swing.GroupLayout.PREFERRED_SIZE, 165, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap(130, Short.MAX_VALUE))
         );
         jPanel4Layout.setVerticalGroup(
             jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -136,7 +622,9 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(ShowBalance)
                 .addGap(18, 18, 18)
-                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 41, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(RefundBtn, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(jButton1, javax.swing.GroupLayout.DEFAULT_SIZE, 41, Short.MAX_VALUE))
                 .addContainerGap(77, Short.MAX_VALUE))
         );
 
@@ -253,28 +741,26 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
                 .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel6Layout.createSequentialGroup()
                         .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(DiscountLabel)
                             .addComponent(jSeparator1, javax.swing.GroupLayout.PREFERRED_SIZE, 368, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(TotalLabel, javax.swing.GroupLayout.PREFERRED_SIZE, 50, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                .addComponent(PaymentMethod)
+                                .addGroup(jPanel6Layout.createSequentialGroup()
+                                    .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(DiscountLabel)
+                                        .addComponent(TotalLabel, javax.swing.GroupLayout.PREFERRED_SIZE, 50, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addGap(198, 198, 198)
+                                    .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                        .addComponent(Total, javax.swing.GroupLayout.PREFERRED_SIZE, 85, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                        .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                            .addComponent(Discount)
+                                            .addComponent(Subtotal))))))
                         .addGap(0, 0, Short.MAX_VALUE))
                     .addGroup(jPanel6Layout.createSequentialGroup()
                         .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(jPanel6Layout.createSequentialGroup()
-                                .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 368, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGroup(jPanel6Layout.createSequentialGroup()
-                                        .addComponent(SubtotalLabel)
-                                        .addGap(229, 229, 229)
-                                        .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addComponent(Discount)
-                                            .addComponent(Subtotal)
-                                            .addComponent(Total, javax.swing.GroupLayout.PREFERRED_SIZE, 47, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                                .addGap(0, 18, Short.MAX_VALUE))
-                            .addGroup(jPanel6Layout.createSequentialGroup()
-                                .addComponent(PaymentMethodLabel)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                .addComponent(PaymentMethod)))
-                        .addContainerGap())))
+                            .addComponent(PaymentMethodLabel)
+                            .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 368, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(SubtotalLabel))
+                        .addContainerGap(24, Short.MAX_VALUE))))
         );
         jPanel6Layout.setVerticalGroup(
             jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -360,8 +846,12 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
-        // TODO add your handling code here:
+        printReceipt();
     }//GEN-LAST:event_jButton1ActionPerformed
+
+    private void RefundBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_RefundBtnActionPerformed
+        refundSale();
+    }//GEN-LAST:event_RefundBtnActionPerformed
 
     /**
      * @param args the command line arguments
@@ -402,6 +892,7 @@ public class ReceiptInvoicePrintout extends javax.swing.JFrame {
     private javax.swing.JLabel ReceiptInvoiceLabel;
     private javax.swing.JLabel ReceiptLabel;
     private javax.swing.JLabel ReciptId;
+    private javax.swing.JButton RefundBtn;
     private javax.swing.JLabel SaleCompleteLabel;
     private javax.swing.JLabel ShowBalance;
     private javax.swing.JLabel Subtotal;

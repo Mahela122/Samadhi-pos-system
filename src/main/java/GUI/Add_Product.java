@@ -13,6 +13,7 @@ public class Add_Product extends javax.swing.JDialog {
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(Add_Product.class.getName());
     private java.util.Map<String, Integer> categoryMap = new java.util.HashMap<>();
     private java.util.Map<String, Integer> supplierMap = new java.util.HashMap<>();
+    private Integer editingProductId = null; 
     /**
      * Creates new form NewJDialog
      */
@@ -59,6 +60,126 @@ public class Add_Product extends javax.swing.JDialog {
             logger.log(java.util.logging.Level.SEVERE, "Failed to load suppliers", e);
         }
     }
+    
+    // Opens the dialog in EDIT mode, filled in with an existing product's details
+    public Add_Product(java.awt.Frame parent, boolean modal, int productId) {
+        this(parent, modal); // builds the form and loads categories + suppliers
+        this.editingProductId = productId;
+        jLabel6.setText("Stock on Hand");
+        btnSave.setText("Update Product");
+        loadProductForEdit();
+    }
+
+    // READ one product: fills the form with its current details
+    private void loadProductForEdit() {
+        String sql = "SELECT p.product_name, p.sku, p.unit_price, p.supplier_id, "
+                   + "c.category_name, s.supplier_name, i.quantity_on_hand, i.reorder_level "
+                   + "FROM products p "
+                   + "JOIN product_categories c ON p.category_id = c.category_id "
+                   + "JOIN inventory i ON p.product_id = i.product_id "
+                   + "LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id "
+                   + "WHERE p.product_id = ?";
+
+        try (java.sql.Connection conn = CODE.DBConnection.getConnection();
+             java.sql.PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, editingProductId);
+
+            try (java.sql.ResultSet rs = pstmt.executeQuery()) {
+                if (!rs.next()) {
+                    javax.swing.JOptionPane.showMessageDialog(this, "This product could not be found.",
+                            "Not Found", javax.swing.JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+
+                lblProduct.setText(rs.getString("product_name"));
+                lblSKU.setText(rs.getString("sku"));
+                lblPrice.setText(rs.getBigDecimal("unit_price").toPlainString());
+                lblStock.setText(String.valueOf(rs.getInt("quantity_on_hand")));
+                lblReorder.setText(String.valueOf(rs.getInt("reorder_level")));
+                cmbCategory.setSelectedItem(rs.getString("category_name"));
+
+                String supplierName = rs.getString("supplier_name");
+                if (supplierName == null) {
+                    cmbSupplier.setSelectedItem("None");
+                } else {
+                    // An Inactive supplier isn't in the list, so add it to keep the product's link
+                    if (!supplierMap.containsKey(supplierName)) {
+                        supplierMap.put(supplierName, rs.getInt("supplier_id"));
+                        cmbSupplier.addItem(supplierName);
+                    }
+                    cmbSupplier.setSelectedItem(supplierName);
+                }
+            }
+        } catch (java.sql.SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load product for edit", e);
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Failed to load product: " + e.getMessage(),
+                    "Database Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // UPDATE: saves changes to an existing product (products + inventory in one transaction)
+    private void updateProduct(String productName, String sku, double price, int stock,
+                               int reorderLevel, int categoryId, Integer supplierId) {
+        java.sql.Connection conn = null;
+        try {
+            conn = CODE.DBConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            String productSql = "UPDATE products "
+                              + "SET category_id = ?, supplier_id = ?, product_name = ?, sku = ?, unit_price = ? "
+                              + "WHERE product_id = ?";
+            try (java.sql.PreparedStatement pstmt = conn.prepareStatement(productSql)) {
+                pstmt.setInt(1, categoryId);
+                if (supplierId == null) {
+                    pstmt.setNull(2, java.sql.Types.INTEGER);
+                } else {
+                    pstmt.setInt(2, supplierId);
+                }
+                pstmt.setString(3, productName);
+                pstmt.setString(4, sku);
+                pstmt.setDouble(5, price);
+                pstmt.setInt(6, editingProductId);
+                pstmt.executeUpdate();
+            }
+
+            String inventorySql = "UPDATE inventory SET quantity_on_hand = ?, reorder_level = ? "
+                                + "WHERE product_id = ?";
+            try (java.sql.PreparedStatement pstmt = conn.prepareStatement(inventorySql)) {
+                pstmt.setInt(1, stock);
+                pstmt.setInt(2, reorderLevel);
+                pstmt.setInt(3, editingProductId);
+                pstmt.executeUpdate();
+            }
+
+            conn.commit(); // both tables are saved together, or neither is
+
+            if (getParent() instanceof Inventory_and_product_management) {
+                ((Inventory_and_product_management) getParent()).loadProducts();
+            }
+
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Product updated successfully!", "Success",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            this.dispose();
+
+        } catch (java.sql.SQLIntegrityConstraintViolationException dupEx) {
+            if (conn != null) try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Another product already uses this SKU.", "Duplicate SKU",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } catch (java.sql.SQLException dbEx) {
+            if (conn != null) try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
+            logger.log(java.util.logging.Level.SEVERE, "Error updating product", dbEx);
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "Database error: " + dbEx.getMessage(), "Error",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } finally {
+            if (conn != null) {
+                try { conn.setAutoCommit(true); conn.close(); } catch (java.sql.SQLException ignored) {}
+            }
+        }
+    }    
 
 
     /**
@@ -90,40 +211,53 @@ public class Add_Product extends javax.swing.JDialog {
 
         setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
-        jLabel1.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
-        jLabel1.setText("INVENTORY & PRODUCT MANAGEMENT  -   SUB  - INVENTORY ");
+        jPanel1.setBackground(new java.awt.Color(255, 255, 255));
 
+        jLabel1.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        jLabel1.setText("INVENTORY & PRODUCT MANAGEMENT");
+
+        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel2.setText("Product name ");
 
         lblProduct.addActionListener(this::lblProductActionPerformed);
 
+        jLabel3.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel3.setText("SKU");
 
         lblSKU.addActionListener(this::lblSKUActionPerformed);
 
+        jLabel4.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel4.setText("Price (Rs.)");
 
         lblPrice.addActionListener(this::lblPriceActionPerformed);
 
+        jLabel6.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel6.setText("Initial Stock");
 
+        jLabel5.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel5.setText("Reorder Level");
 
         lblReorder.addActionListener(this::lblReorderActionPerformed);
 
         lblStock.addActionListener(this::lblStockActionPerformed);
 
-        btnSave.setBackground(new java.awt.Color(0, 153, 51));
+        btnSave.setBackground(new java.awt.Color(11, 107, 109));
+        btnSave.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         btnSave.setForeground(new java.awt.Color(255, 255, 255));
         btnSave.setText("Save Product");
         btnSave.addActionListener(this::btnSaveActionPerformed);
 
+        cmbCategory.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         cmbCategory.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
+        cmbCategory.addActionListener(this::cmbCategoryActionPerformed);
 
+        jLabel7.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel7.setText("Category");
 
+        cmbSupplier.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         cmbSupplier.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
 
+        jLabel8.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel8.setText("Supplier ");
 
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
@@ -131,72 +265,69 @@ public class Add_Product extends javax.swing.JDialog {
         jPanel1Layout.setHorizontalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
-                .addContainerGap()
-                .addComponent(jLabel6)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addComponent(jLabel5)
-                .addGap(80, 80, 80))
-            .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGap(22, 22, 22)
-                .addComponent(jLabel3)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addComponent(jLabel4)
-                .addGap(108, 108, 108))
-            .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addContainerGap()
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                    .addGroup(javax.swing.GroupLayout.Alignment.LEADING, jPanel1Layout.createSequentialGroup()
+                        .addGap(22, 22, 22)
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                .addGroup(javax.swing.GroupLayout.Alignment.LEADING, jPanel1Layout.createSequentialGroup()
-                                    .addComponent(lblSKU, javax.swing.GroupLayout.PREFERRED_SIZE, 136, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(91, 91, 91)
-                                    .addComponent(lblPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 136, javax.swing.GroupLayout.PREFERRED_SIZE))
-                                .addComponent(jLabel1)
-                                .addGroup(jPanel1Layout.createSequentialGroup()
-                                    .addComponent(lblStock, javax.swing.GroupLayout.PREFERRED_SIZE, 136, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(91, 91, 91)
-                                    .addComponent(lblReorder, javax.swing.GroupLayout.PREFERRED_SIZE, 136, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                            .addComponent(jLabel2)
-                            .addComponent(lblProduct, javax.swing.GroupLayout.PREFERRED_SIZE, 363, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                            .addComponent(lblProduct)
+                            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addGroup(jPanel1Layout.createSequentialGroup()
+                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                            .addComponent(jLabel3)
+                                            .addComponent(jLabel6))
+                                        .addGap(0, 0, Short.MAX_VALUE))
+                                    .addComponent(lblSKU)
+                                    .addComponent(lblStock, javax.swing.GroupLayout.Alignment.TRAILING))
+                                .addGap(18, 18, 18)
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addComponent(lblReorder, javax.swing.GroupLayout.PREFERRED_SIZE, 210, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addComponent(lblPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 198, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addComponent(jLabel4)
+                                    .addComponent(jLabel5)))
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addComponent(jLabel2)
+                                    .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 368, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                .addGap(0, 0, Short.MAX_VALUE))))
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                            .addGroup(javax.swing.GroupLayout.Alignment.LEADING, jPanel1Layout.createSequentialGroup()
-                                .addGap(27, 27, 27)
-                                .addComponent(jLabel7, javax.swing.GroupLayout.PREFERRED_SIZE, 56, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                .addComponent(cmbCategory, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                .addComponent(jLabel8, javax.swing.GroupLayout.PREFERRED_SIZE, 56, javax.swing.GroupLayout.PREFERRED_SIZE))
-                            .addGroup(javax.swing.GroupLayout.Alignment.LEADING, jPanel1Layout.createSequentialGroup()
-                                .addGap(150, 150, 150)
-                                .addComponent(btnSave)))
+                        .addContainerGap(56, Short.MAX_VALUE)
+                        .addComponent(jLabel7, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(cmbSupplier, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                .addContainerGap(31, Short.MAX_VALUE))
+                        .addComponent(cmbCategory, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(25, 25, 25)
+                        .addComponent(jLabel8)
+                        .addGap(18, 18, 18)
+                        .addComponent(cmbSupplier, javax.swing.GroupLayout.PREFERRED_SIZE, 90, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(42, 42, 42)))
+                .addGap(24, 24, 24))
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(153, 153, 153)
+                .addComponent(btnSave, javax.swing.GroupLayout.PREFERRED_SIZE, 133, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGap(14, 14, 14)
-                .addComponent(jLabel1)
-                .addGap(31, 31, 31)
-                .addComponent(jLabel2)
+                .addGap(20, 20, 20)
+                .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 33, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(18, 18, 18)
-                .addComponent(lblProduct, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(jLabel2)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(lblProduct, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(12, 12, 12)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(jLabel3)
                     .addComponent(jLabel4))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(lblSKU, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(lblPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(lblPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(lblSKU, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addGap(18, 18, 18)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(jLabel6)
                     .addComponent(jLabel5))
-                .addGap(18, 18, 18)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(lblStock, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(lblReorder, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE))
@@ -206,9 +337,9 @@ public class Add_Product extends javax.swing.JDialog {
                     .addComponent(cmbCategory, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(jLabel8)
                     .addComponent(cmbSupplier, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 69, Short.MAX_VALUE)
-                .addComponent(btnSave)
-                .addGap(18, 18, 18))
+                .addGap(18, 18, 18)
+                .addComponent(btnSave, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(45, Short.MAX_VALUE))
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -246,7 +377,7 @@ public class Add_Product extends javax.swing.JDialog {
     }//GEN-LAST:event_lblStockActionPerformed
 
     private void btnSaveActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSaveActionPerformed
-        
+//Error Exception        
     try {
         // 1. Retrieve text inputs
         String productName = lblProduct.getText().trim();
@@ -304,7 +435,14 @@ public class Add_Product extends javax.swing.JDialog {
         Integer supplierId = (selectedSupplier == null || selectedSupplier.equals("None"))
                 ? null
                 : supplierMap.get(selectedSupplier);
-
+        
+        // EDIT mode: update the existing product instead of creating a new one
+        if (editingProductId != null) {
+            updateProduct(productName, sku, price, stock, reorderLevel, categoryId, supplierId);
+            return;
+        }        
+        
+//CREATE
         // 7. Insert into products + inventory in a single transaction
         java.sql.Connection conn = null;
         try {
@@ -382,6 +520,10 @@ public class Add_Product extends javax.swing.JDialog {
 
           
     }//GEN-LAST:event_btnSaveActionPerformed
+
+    private void cmbCategoryActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbCategoryActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_cmbCategoryActionPerformed
 
     /**
      * @param args the command line arguments

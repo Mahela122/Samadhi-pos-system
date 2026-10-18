@@ -25,6 +25,7 @@ public class Supplierlist extends javax.swing.JFrame {
      */
     public Supplierlist() {
         initComponents();
+        setupActionColumn();
         loadSuppliers();
 
         // Set up the row sorter for filtering
@@ -56,26 +57,39 @@ public class Supplierlist extends javax.swing.JFrame {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { filterTable(); }
         });
     }
-
+//READ
     public void loadSuppliers() {
+        if (jTable1.isEditing()) {
+            jTable1.getCellEditor().cancelCellEditing();
+        }
+
         javax.swing.table.DefaultTableModel model = (javax.swing.table.DefaultTableModel) jTable1.getModel();
         model.setRowCount(0);
+        supplierIds.clear();
 
-        String sql = "SELECT supplier_name, contact_person, phone_number, status FROM suppliers";
+        // Joins each supplier to its products and puts all the product names in one cell
+        String sql = "SELECT s.supplier_id, s.supplier_name, s.contact_person, s.phone_number, s.status, "
+                   + "GROUP_CONCAT(p.product_name ORDER BY p.product_name SEPARATOR ', ') AS items "
+                   + "FROM suppliers s "
+                   + "LEFT JOIN products p ON p.supplier_id = s.supplier_id AND p.status = 'Active' "
+                   + "GROUP BY s.supplier_id, s.supplier_name, s.contact_person, s.phone_number, s.status "
+                   + "ORDER BY s.supplier_id";
 
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
             while (rs.next()) {
+                String items = rs.getString("items");   // null when the supplier has no products
+
+                supplierIds.add(rs.getInt("supplier_id"));
                 model.addRow(new Object[]{
                     rs.getString("supplier_name"),
                     rs.getString("contact_person"),
                     rs.getString("phone_number"),
-                    "-",                          // Item Supplied — no direct column; placeholder for now
-                    0,                            // Supplies Count — needs a join/count query later
+                    (items == null) ? "-" : items,      // Item Supplied
                     rs.getString("status"),
-                    ""                            // Action column
+                    ""                                  // Action column
                 });
             }
         } catch (SQLException e) {
@@ -119,6 +133,110 @@ public class Supplierlist extends javax.swing.JFrame {
         RowFilter<Object, Object> filter = RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0, 1, 3);
         sorter.setRowFilter(filter);
     }
+    
+
+    // Double-click to edit Name, Contact, Phone, Status. Red cross = delete.
+    private void setupActionColumn() {
+        jTable1.setModel(new javax.swing.table.DefaultTableModel(
+                new Object[][]{},
+                new String[]{"Supplier Name", "Contact Person", "Phone", "Item Supplied", "Status", ""}) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return column == 0 || column == 1 || column == 2 || column == 4; // Item Supplied is calculated
+            }
+        });
+
+        jTable1.setRowHeight(32);
+        jTable1.getColumnModel().getColumn(3).setPreferredWidth(250);   // more room for item names
+        CODE.TableHelper.useDropDown(jTable1, 4, "Active", "Inactive");
+        CODE.TableHelper.onCellEdited(jTable1, this::saveSupplierEdit, this::loadSuppliers);
+        CODE.TableHelper.installDeleteColumn(jTable1, 5, this::deleteSupplier);
+        CODE.TableHelper.addRightClickOption(jTable1, "Edit all details", this::editSupplier);
+    }
+
+    // UPDATE - opens the supplier form in edit mode
+    private void editSupplier(int modelRow) {
+        if (modelRow < 0 || modelRow >= supplierIds.size()) {
+            return;
+        }
+        int supplierId = supplierIds.get(modelRow);
+
+        addEditSupplierForm form = new addEditSupplierForm(this, supplierId);
+        form.setLocationRelativeTo(this);
+        form.setVisible(true);
+    }
+
+    // DELETE
+    private void deleteSupplier(int modelRow) {
+        if (modelRow < 0 || modelRow >= supplierIds.size()) {
+            return;
+        }
+        int supplierId = supplierIds.get(modelRow);
+        String name = String.valueOf(jTable1.getModel().getValueAt(modelRow, 0));
+
+        int choice = JOptionPane.showConfirmDialog(this,
+            "Delete supplier \"" + name + "\"?\nTheir products will stay, but with no supplier.",
+            "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        String sql = "DELETE FROM suppliers WHERE supplier_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, supplierId);
+            pstmt.executeUpdate();
+            JOptionPane.showMessageDialog(this, "Supplier deleted.");
+            loadSuppliers();
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to delete supplier", e);
+            JOptionPane.showMessageDialog(this, "Failed to delete supplier: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }  
+    
+    // INLINE UPDATE: saves the cell that was just edited
+    private boolean saveSupplierEdit(int modelRow, int column, Object newValue) {
+        int supplierId = supplierIds.get(modelRow);
+        String value = (newValue == null) ? "" : newValue.toString().trim();
+
+        String dbColumn;   // fixed names only, so it is safe to put in the SQL
+        switch (column) {
+            case 0: dbColumn = "supplier_name";  break;
+            case 1: dbColumn = "contact_person"; break;
+            case 2: dbColumn = "phone_number";   break;
+            case 4: dbColumn = "status";         break;
+            default: return false;
+        }
+
+        if (value.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "This field can't be empty.",
+                    "Missing Information", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        if (column == 2 && !value.matches("\\d{10}")) {
+            JOptionPane.showMessageDialog(this, "Phone number must be 10 digits (e.g. 0112345678).",
+                    "Invalid Phone", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "UPDATE suppliers SET " + dbColumn + " = ? WHERE supplier_id = ?")) {
+            pstmt.setString(1, value);
+            pstmt.setInt(2, supplierId);
+            pstmt.executeUpdate();
+            if (column == 4) {
+                updateSummaryCounts();   // the "Active Partners" card changes
+            }
+            return true;
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to update supplier", e);
+            JOptionPane.showMessageDialog(this, "Could not save the change: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return false;
+    }    
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -152,6 +270,9 @@ public class Supplierlist extends javax.swing.JFrame {
         jLabel1.setFont(new java.awt.Font("Segoe UI", 1, 36)); // NOI18N
         jLabel1.setText("Supplier");
 
+        jButton1.setBackground(new java.awt.Color(11, 107, 109));
+        jButton1.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
+        jButton1.setForeground(new java.awt.Color(255, 255, 255));
         jButton1.setText("+Add Supplier");
         jButton1.addActionListener(this::jButton1ActionPerformed);
 
@@ -160,24 +281,25 @@ public class Supplierlist extends javax.swing.JFrame {
         jPanel1Layout.setHorizontalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGap(38, 38, 38)
+                .addGap(34, 34, 34)
                 .addComponent(jLabel1)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 118, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(64, 64, 64))
+                .addComponent(jButton1)
+                .addGap(66, 66, 66))
         );
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGap(19, 19, 19)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jLabel1))
-                .addContainerGap(26, Short.MAX_VALUE))
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                .addContainerGap(49, Short.MAX_VALUE)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel1)
+                    .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 46, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addContainerGap())
         );
 
         jPanel2.setBackground(new java.awt.Color(255, 255, 255));
 
+        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel2.setText("Total Suppliers");
 
         jLabel3.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
@@ -209,6 +331,7 @@ public class Supplierlist extends javax.swing.JFrame {
         jLabel7.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         jLabel7.setText("3");
 
+        jLabel6.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel6.setText("Pending Deliveries");
 
         javax.swing.GroupLayout jPanel4Layout = new javax.swing.GroupLayout(jPanel4);
@@ -237,6 +360,7 @@ public class Supplierlist extends javax.swing.JFrame {
         jLabel5.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         jLabel5.setText("14");
 
+        jLabel4.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel4.setText("Active Partners");
 
         javax.swing.GroupLayout jPanel3Layout = new javax.swing.GroupLayout(jPanel3);
@@ -260,6 +384,7 @@ public class Supplierlist extends javax.swing.JFrame {
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
 
+        jTextField1.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         jTextField1.setText("Search by name,contact,items");
 
         jTable1.setModel(new javax.swing.table.DefaultTableModel(
@@ -297,7 +422,7 @@ public class Supplierlist extends javax.swing.JFrame {
                         .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addGap(89, 89, 89)
                         .addComponent(jPanel3, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 55, Short.MAX_VALUE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                         .addComponent(jPanel4, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
                 .addGap(41, 41, 41))
         );
@@ -313,7 +438,7 @@ public class Supplierlist extends javax.swing.JFrame {
                 .addGap(43, 43, 43)
                 .addComponent(jTextField1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(39, 39, 39)
-                .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 330, Short.MAX_VALUE))
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 305, Short.MAX_VALUE))
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -388,4 +513,5 @@ public class Supplierlist extends javax.swing.JFrame {
     private javax.swing.JTextField jTextField1;
     // End of variables declaration//GEN-END:variables
     private javax.swing.table.TableRowSorter<javax.swing.table.DefaultTableModel> sorter;
+    private final java.util.List<Integer> supplierIds = new java.util.ArrayList<>();    
 }

@@ -8,6 +8,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.sql.ResultSet;
 import javax.swing.JOptionPane;
 import CODE.DBConnection;
 /**
@@ -16,7 +17,9 @@ import CODE.DBConnection;
  */
 public class New_customer extends javax.swing.JDialog {
 
-    private Customer_management parentFrame;   // ← ADD THIS FIELD
+    private Customer_management parentFrame;  
+    
+    private Integer editingCustomerId = null; // null = adding a new customer, otherwise = editing this customer
 
     /**
      * Creates new form New_customer
@@ -24,12 +27,70 @@ public class New_customer extends javax.swing.JDialog {
     public New_customer(java.awt.Frame parent, boolean modal) {
         super(parent, modal);
         initComponents();
-        if (parent instanceof Customer_management) {          // ← ADD THIS BLOCK
+        if (parent instanceof Customer_management) {          
             this.parentFrame = (Customer_management) parent;
         }
         jButton1.addActionListener(evt -> saveCustomer());
+        loadTierOptions();
     }
 
+    private void loadTierOptions() {
+        String sql = "SELECT tier_name FROM loyalty_tiers ORDER BY min_points ASC";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            cbTier.removeAllItems();
+            while (rs.next()) {
+                cbTier.addItem(rs.getString("tier_name"));
+            }
+            if (cbTier.getItemCount() > 0) {
+                cbTier.setSelectedIndex(0);
+            }
+
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this,
+                "Failed to load tiers: " + ex.getMessage(),
+                "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    // Opens the dialog in EDIT mode, filled in with an existing customer's details
+    public New_customer(java.awt.Frame parent, boolean modal, int customerId) {
+        this(parent, modal); // builds the form and loads the tier list
+        this.editingCustomerId = customerId;
+        jLabel2.setText("Edit Customer");
+        jLabel5.setText("Loyalty Tier");
+        jButton1.setText("Update Customer");
+        loadCustomerForEdit();
+    }
+
+    // READ one customer: fills the form with their current details
+    private void loadCustomerForEdit() {
+        String sql = "SELECT full_name, phone_number, loyalty_tier FROM customers WHERE customer_id = ?";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, editingCustomerId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String name = rs.getString("full_name");
+                    jTextField1.setText(name == null ? "" : name);
+                    jTextField2.setText(rs.getString("phone_number"));
+                    cbTier.setSelectedItem(rs.getString("loyalty_tier"));
+                } else {
+                    JOptionPane.showMessageDialog(this, "This customer could not be found.",
+                        "Not Found", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this,
+                "Failed to load customer: " + ex.getMessage(),
+                "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
     /**
      * This method is called from within the constructor to initialize the form.
      * WARNING: Do NOT modify this code. The content of this method is always
@@ -48,39 +109,31 @@ public class New_customer extends javax.swing.JDialog {
         jTextField2 = new javax.swing.JTextField();
         jLabel5 = new javax.swing.JLabel();
         jButton1 = new javax.swing.JButton();
-        rbBronze = new javax.swing.JRadioButton();
-        rbSilver = new javax.swing.JRadioButton();
-        rbGold = new javax.swing.JRadioButton();
+        cbTier = new javax.swing.JComboBox<>();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
-        jLabel1.setFont(new java.awt.Font("Segoe UI", 0, 18)); // NOI18N
-        jLabel1.setText("CUSTOMER MANAGEMENT   .    SUB-INTERFACE");
+        jLabel1.setFont(new java.awt.Font("Segoe UI", 1, 24)); // NOI18N
+        jLabel1.setText("CUSTOMER MANAGEMENT");
 
-        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
+        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         jLabel2.setText("New Customer");
 
-        jLabel3.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
+        jLabel3.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel3.setText("Full Name");
 
-        jLabel4.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
+        jLabel4.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel4.setText("Phone Number");
 
-        jLabel5.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
+        jLabel5.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel5.setText("Starting Tier");
 
-        jButton1.setBackground(new java.awt.Color(0, 152, 51));
+        jButton1.setBackground(new java.awt.Color(11, 107, 109));
+        jButton1.setFont(new java.awt.Font("Segoe UI", 1, 18)); // NOI18N
         jButton1.setForeground(new java.awt.Color(255, 255, 255));
         jButton1.setText("Save Customer");
 
-        tierGroup.add(rbBronze);
-        rbBronze.setText("Bronze");
-
-        tierGroup.add(rbSilver);
-        rbSilver.setText("Silver");
-
-        tierGroup.add(rbGold);
-        rbGold.setText("Gold");
+        cbTier.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
         getContentPane().setLayout(layout);
@@ -88,36 +141,33 @@ public class New_customer extends javax.swing.JDialog {
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 274, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(107, 107, 107))
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 274, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(107, 107, 107))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addComponent(jLabel1)
+                        .addGap(90, 90, 90))))
             .addGroup(layout.createSequentialGroup()
                 .addGap(17, 17, 17)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(cbTier, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(jTextField2, javax.swing.GroupLayout.PREFERRED_SIZE, 462, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(jLabel4)
                     .addComponent(jTextField1, javax.swing.GroupLayout.PREFERRED_SIZE, 462, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jLabel1)
-                    .addComponent(jLabel2)
                     .addComponent(jLabel3)
-                    .addComponent(jLabel5))
+                    .addComponent(jLabel5)
+                    .addComponent(jLabel2, javax.swing.GroupLayout.PREFERRED_SIZE, 143, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addContainerGap(21, Short.MAX_VALUE))
-            .addGroup(layout.createSequentialGroup()
-                .addGap(52, 52, 52)
-                .addComponent(rbBronze, javax.swing.GroupLayout.PREFERRED_SIZE, 98, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addComponent(rbSilver, javax.swing.GroupLayout.PREFERRED_SIZE, 98, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(51, 51, 51)
-                .addComponent(rbGold, javax.swing.GroupLayout.PREFERRED_SIZE, 98, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(42, 42, 42))
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
-                .addGap(24, 24, 24)
+                .addGap(30, 30, 30)
                 .addComponent(jLabel1)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addGap(18, 18, 18)
                 .addComponent(jLabel2)
-                .addGap(24, 24, 24)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addComponent(jLabel3)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(jTextField1, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
@@ -127,12 +177,9 @@ public class New_customer extends javax.swing.JDialog {
                 .addComponent(jTextField2, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(18, 18, 18)
                 .addComponent(jLabel5)
-                .addGap(18, 18, 18)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(rbBronze)
-                    .addComponent(rbSilver)
-                    .addComponent(rbGold))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 63, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(cbTier, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 56, Short.MAX_VALUE)
                 .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 53, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(58, 58, 58))
         );
@@ -140,76 +187,78 @@ public class New_customer extends javax.swing.JDialog {
         pack();
     }// </editor-fold>//GEN-END:initComponents
 
-        private void saveCustomer() {
-            String fullName = jTextField1.getText().trim();
-            String phone = jTextField2.getText().trim();
-            String tier = getSelectedTier();
+    private void saveCustomer() {
+        String fullName = jTextField1.getText().trim();
+        String phone = jTextField2.getText().trim();
+        String tier = getSelectedTier();
 
-            if (phone.isEmpty()) {
-                JOptionPane.showMessageDialog(this,
-                    "Phone number cannot be empty.", "Validation Error",
-                    JOptionPane.WARNING_MESSAGE);
-                jTextField2.requestFocus();
-                return;
-            }
-
-            if (!phone.matches("^0\\d{9}$")) {
-                JOptionPane.showMessageDialog(this,
-                    "Enter a valid 10-digit phone number starting with 0.",
-                    "Validation Error", JOptionPane.WARNING_MESSAGE);
-                jTextField2.requestFocus();
-                return;
-            }
-
-            if (tier == null) {
-                JOptionPane.showMessageDialog(this,
-                    "Please select a starting tier.", "Validation Error",
-                    JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-
-            String sql = "INSERT INTO customers (phone_number, full_name, loyalty_tier, loyalty_points) "
-                       + "VALUES (?, ?, ?, 0)";
-
-            try (Connection conn = DBConnection.getConnection();
-                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-                pstmt.setString(1, phone);
-                if (fullName.isEmpty()) {
-                    pstmt.setNull(2, java.sql.Types.VARCHAR);
-                } else {
-                    pstmt.setString(2, fullName);
-                }
-                pstmt.setString(3, tier);
-
-                pstmt.executeUpdate();
-
-                if (parentFrame != null) {
-                    parentFrame.loadCustomers();
-                }
-
-                JOptionPane.showMessageDialog(this,
-                    "Customer saved successfully.", "Success",
-                    JOptionPane.INFORMATION_MESSAGE);
-                this.dispose();
-
-            } catch (SQLIntegrityConstraintViolationException dupEx) {
-                JOptionPane.showMessageDialog(this,
-                    "A customer with this phone number already exists.", "Duplicate Phone Number",
-                    JOptionPane.ERROR_MESSAGE);
-            } catch (SQLException ex) {
-                JOptionPane.showMessageDialog(this,
-                    "Database error: " + ex.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            }
+        if (phone.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                "Phone number cannot be empty.", "Validation Error",
+                JOptionPane.WARNING_MESSAGE);
+            jTextField2.requestFocus();
+            return;
         }
 
-    private String getSelectedTier() {
-        if (rbBronze.isSelected()) return "Bronze";
-        if (rbSilver.isSelected()) return "Silver";
-        if (rbGold.isSelected()) return "Gold";
-        return null;
+        if (!phone.matches("^0\\d{9}$")) {
+            JOptionPane.showMessageDialog(this,
+                "Enter a valid 10-digit phone number starting with 0.",
+                "Validation Error", JOptionPane.WARNING_MESSAGE);
+            jTextField2.requestFocus();
+            return;
+        }
+
+        if (tier == null) {
+            JOptionPane.showMessageDialog(this,
+                "Please select a tier.", "Validation Error",
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // CREATE when adding, UPDATE when editing
+        boolean isEdit = (editingCustomerId != null);
+        String sql = isEdit
+            ? "UPDATE customers SET phone_number = ?, full_name = ?, loyalty_tier = ? WHERE customer_id = ?"
+            : "INSERT INTO customers (phone_number, full_name, loyalty_tier, loyalty_points) VALUES (?, ?, ?, 0)";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, phone);
+            if (fullName.isEmpty()) {
+                pstmt.setNull(2, java.sql.Types.VARCHAR);
+            } else {
+                pstmt.setString(2, fullName);
+            }
+            pstmt.setString(3, tier);
+            if (isEdit) {
+                pstmt.setInt(4, editingCustomerId);
+            }
+
+            pstmt.executeUpdate();
+
+            if (parentFrame != null) {
+                parentFrame.loadCustomers(); // refresh the table
+            }
+
+            JOptionPane.showMessageDialog(this,
+                isEdit ? "Customer updated successfully." : "Customer saved successfully.",
+                "Success", JOptionPane.INFORMATION_MESSAGE);
+            this.dispose();
+
+        } catch (SQLIntegrityConstraintViolationException dupEx) {
+            JOptionPane.showMessageDialog(this,
+                "A customer with this phone number already exists.", "Duplicate Phone Number",
+                JOptionPane.ERROR_MESSAGE);
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this,
+                "Database error: " + ex.getMessage(), "Error",
+                JOptionPane.ERROR_MESSAGE);
+        }
     }
+        private String getSelectedTier() {
+            return (String) cbTier.getSelectedItem();
+        }
     /**
      * @param args the command line arguments
      */
@@ -253,6 +302,7 @@ public class New_customer extends javax.swing.JDialog {
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JComboBox<String> cbTier;
     private javax.swing.JButton jButton1;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
@@ -261,9 +311,6 @@ public class New_customer extends javax.swing.JDialog {
     private javax.swing.JLabel jLabel5;
     private javax.swing.JTextField jTextField1;
     private javax.swing.JTextField jTextField2;
-    private javax.swing.JRadioButton rbBronze;
-    private javax.swing.JRadioButton rbGold;
-    private javax.swing.JRadioButton rbSilver;
     private javax.swing.ButtonGroup tierGroup;
     // End of variables declaration//GEN-END:variables
 }

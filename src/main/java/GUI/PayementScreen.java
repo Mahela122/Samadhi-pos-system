@@ -4,6 +4,15 @@
  */
 package GUI;
 
+import CODE.PaymentDAO;
+import java.math.BigDecimal;
+import javax.swing.JOptionPane;
+import CODE.DBConnection;
+import java.math.RoundingMode;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+
 /**
  *
  * @author User
@@ -11,14 +20,89 @@ package GUI;
 public class PayementScreen extends javax.swing.JFrame {
     
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(PayementScreen.class.getName());
-
+    
+    private int orderId = -1;
+    private BigDecimal totalAmount = BigDecimal.ZERO;
+    private boolean isCashSelected = true;
+    private final PaymentDAO paymentDAO = new PaymentDAO();
+    private OrderReview reviewWindow;   // the Order Review screen (Back returns here)
+    private POS_Billing billingWindow;  // the Billing screen (cleared after a sale)
     /**
      * Creates new form PayementScreen
      */
+
     public PayementScreen() {
         initComponents();
+        AddProduct.setText("Cancel Order");                          // this button now cancels the unpaid order
+        AddProduct.setBackground(new java.awt.Color(220, 38, 38));    // red, like the Del buttons
+        // X button works the same as Back (removes the unpaid order and returns to Order Review)
+        setDefaultCloseOperation(javax.swing.WindowConstants.DO_NOTHING_ON_CLOSE);
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                goBackToReview();
+            }
+        });
+        CODE.NavBar.addTo(this, "← Back to Order Review", this::goBackToReview);      
         restrictToDigits(AmountTenderedText);//AmountTenderedText
+
+        // Recalculate change every time the amount tendered changes
+        AmountTenderedText.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateChangeDue(); }
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateChangeDue(); }
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateChangeDue(); }
+        });
+
+        ConfirmBtn.addActionListener(this::ConfirmBtnActionPerformed);
+        setCashPaymentMode(true); // Cash selected by default, change starts at Rs. 0.00
     }
+
+    /**
+     * Opens the payment screen for a specific order and loads the amount due.
+     */
+    public PayementScreen(int orderId) {
+        this();
+        this.orderId = orderId;
+        loadAmountDue();
+    }
+
+    private void loadAmountDue() {
+        totalAmount = paymentDAO.readAmountDue(orderId);
+        TotalePriceLable.setText("Rs. " + String.format("%,.2f", totalAmount));
+    }    
+    // Called by Order Review so this screen knows where "Back" goes
+    public void setPreviousScreens(OrderReview reviewWindow, POS_Billing billingWindow) {
+        this.reviewWindow = reviewWindow;
+        this.billingWindow = billingWindow;
+    }
+
+    // BACK: the order is not paid yet, so remove it and show Order Review again.
+    // When the cashier clicks Confirm Order again, a fresh order is created (no duplicates).
+    private void goBackToReview() {
+        if (orderId != -1) {
+            String sql = "DELETE FROM orders WHERE order_id = ? "
+                       + "AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.order_id = ?)";
+            try (Connection conn = DBConnection.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setInt(1, orderId);
+                ps.setInt(2, orderId);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                logger.log(java.util.logging.Level.SEVERE, "Failed to remove unpaid order " + orderId, e);
+                JOptionPane.showMessageDialog(this, "Could not go back: " + e.getMessage(),
+                        "Database Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+        }
+        dispose();
+        if (reviewWindow != null) {
+            reviewWindow.setVisible(true);
+        }
+    }        
+
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -60,7 +144,7 @@ public class PayementScreen extends javax.swing.JFrame {
         AddProduct.setBackground(new java.awt.Color(11, 107, 109));
         AddProduct.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         AddProduct.setForeground(new java.awt.Color(255, 255, 255));
-        AddProduct.setText("Add Product");
+        AddProduct.setText("Cancel Order");
         AddProduct.addActionListener(this::AddProductActionPerformed);
 
         javax.swing.GroupLayout jPanel2Layout = new javax.swing.GroupLayout(jPanel2);
@@ -259,12 +343,66 @@ public class PayementScreen extends javax.swing.JFrame {
     }
     
     private void AddProductActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_AddProductActionPerformed
-        // TODO add your handling code here:
+        cancelOrder();
     }//GEN-LAST:event_AddProductActionPerformed
 
     
+    // DELETE - cancels this unpaid order and removes it from the database.
+    // Its order items, discount and delivery rows are removed too (ON DELETE CASCADE).
+    private void cancelOrder() {
+        if (orderId == -1) {
+            dispose();
+            return;
+        }
+
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Cancel order #ORD-" + orderId + "?\nThe order and its items will be deleted.",
+                "Cancel Order", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        // Only deletes the order if it has NOT been paid yet
+        String sql = "DELETE FROM orders WHERE order_id = ? "
+                   + "AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.order_id = ?)";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, orderId);
+            ps.setInt(2, orderId);
+            int rows = ps.executeUpdate();
+
+            if (rows == 0) {
+                JOptionPane.showMessageDialog(this,
+                        "This order is already paid, so it can't be deleted.\nUse Refund Sale on the receipt instead.",
+                        "Cannot Cancel", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            JOptionPane.showMessageDialog(this, "Order #ORD-" + orderId + " was cancelled.");
+            dispose();
+
+            if (reviewWindow != null) {
+                reviewWindow.dispose();          // close the hidden Order Review too
+            }
+            if (billingWindow != null) {
+                billingWindow.returnToBilling(); // back to Billing (cart is kept so it can be edited)
+            }
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to cancel order " + orderId, e);
+            JOptionPane.showMessageDialog(this, "Failed to cancel the order: " + e.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
     private void AmountTenderedTextActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_AmountTenderedTextActionPerformed
-        
+        try {
+            BigDecimal tendered = new BigDecimal(AmountTenderedText.getText().trim());
+            BigDecimal change = tendered.subtract(totalAmount);
+            jLabel3.setText("Rs. " + String.format("%,.2f", change.max(BigDecimal.ZERO)));
+        } catch (NumberFormatException e) {
+            // ignore here; real validation happens on Confirm
+        }
     }//GEN-LAST:event_AmountTenderedTextActionPerformed
 
     
@@ -279,6 +417,8 @@ public class PayementScreen extends javax.swing.JFrame {
     }//GEN-LAST:event_CardTerminalBtnActionPerformed
 
     private void setCashPaymentMode(boolean isCash) {
+    this.isCashSelected = isCash;
+
     AmountTenderedText.setEnabled(isCash);
     jPanel4.setVisible(true); 
 
@@ -290,7 +430,7 @@ public class PayementScreen extends javax.swing.JFrame {
     } else {
         AmountTenderedText.setBackground(java.awt.Color.WHITE);
         ChangeDueLable.setText("Change Due");
-        jLabel3.setText("Change");
+        updateChangeDue();
     }
 
     CashPaymentBtn.setBackground(isCash ? new java.awt.Color(11, 107, 109) : null);
@@ -298,6 +438,117 @@ public class PayementScreen extends javax.swing.JFrame {
     CardTerminalBtn.setBackground(isCash ? null : new java.awt.Color(11, 107, 109));
     CardTerminalBtn.setForeground(isCash ? java.awt.Color.BLACK : java.awt.Color.WHITE);
 }
+
+    // Shows the change live while the cashier types the amount tendered
+    private void updateChangeDue() {
+        if (!isCashSelected) {
+            return; // card payments have no change
+        }
+
+        String text = AmountTenderedText.getText().trim();
+        if (text.isEmpty()) {
+            jLabel3.setText("Rs. 0.00");
+            return;
+        }
+
+        try {
+            BigDecimal tendered = new BigDecimal(text);
+            BigDecimal change = tendered.subtract(totalAmount);
+            if (change.compareTo(BigDecimal.ZERO) < 0) {
+                change = BigDecimal.ZERO; // not enough money given yet
+            }
+            jLabel3.setText("Rs. " + String.format("%,.2f", change));
+        } catch (NumberFormatException e) {
+            jLabel3.setText("Rs. 0.00");
+        }
+    }
+    
+    private void ConfirmBtnActionPerformed(java.awt.event.ActionEvent evt) {
+        if (orderId == -1) {
+            JOptionPane.showMessageDialog(this, "No order loaded for this payment screen.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        String paymentMethod = isCashSelected ? "Cash" : "Card";
+        BigDecimal amountPaid;
+
+        if (isCashSelected) {
+            String tenderedText = AmountTenderedText.getText().trim();
+            if (tenderedText.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please enter the amount tendered.",
+                        "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            try {
+                amountPaid = new BigDecimal(tenderedText);
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this, "Amount tendered must be a valid number.",
+                        "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (amountPaid.compareTo(totalAmount) < 0) {
+                JOptionPane.showMessageDialog(this, "Amount tendered is less than the amount due.",
+                        "Insufficient Amount", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            BigDecimal change = amountPaid.subtract(totalAmount);
+            jLabel3.setText("Rs. " + String.format("%,.2f", change));
+        } else {
+            amountPaid = totalAmount;
+        }
+
+        boolean success = paymentDAO.createPayment(orderId, paymentMethod, amountPaid);
+        if (!success) {
+            String reason = paymentDAO.getLastError();
+            JOptionPane.showMessageDialog(this,
+                    "The payment was NOT saved and no stock was changed.\n"
+                  + (reason != null ? reason : "Please try again."),
+                    "Payment Failed", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        awardLoyaltyPoints();
+        
+        if (reviewWindow != null) {
+            reviewWindow.dispose();          // sale is done, the hidden Order Review is not needed
+        }
+        if (billingWindow != null) {
+            billingWindow.startNewSale();    // empty the cart for the next customer
+        }
+        ReceiptInvoicePrintout receipt = new ReceiptInvoicePrintout(orderId);
+        receipt.setBillingWindow(billingWindow); // so the receipt's Back goes to Billing
+        receipt.setLocationRelativeTo(this);
+        receipt.setVisible(true);
+        this.dispose();
+    }
+    
+    // Award 1 loyalty point for every Rs. 100 of the final total
+    private void awardLoyaltyPoints() {
+        // e.g. Rs. 1,250 -> 12 points, Rs. 99 -> 0 points (always rounds down)
+        int points = totalAmount.divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN).intValue();
+        if (points <= 0) {
+            return;
+        }
+
+        String sql = "UPDATE customers SET loyalty_points = loyalty_points + ? "
+                   + "WHERE customer_id = (SELECT customer_id FROM orders WHERE order_id = ?)";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, points);
+            ps.setInt(2, orderId);
+            ps.executeUpdate();
+            CODE.LoyaltyTiers.updateCustomerOfOrder(conn, orderId);   // move up a tier if they passed the limit
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.WARNING,
+                    "Payment saved but loyalty points not added for order " + orderId, e);
+            JOptionPane.showMessageDialog(this,
+                    "Payment saved, but loyalty points could not be added: " + e.getMessage(),
+                    "Loyalty Points", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
     /**
      * @param args the command line arguments
      */

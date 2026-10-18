@@ -4,6 +4,12 @@
  */
 package GUI;
 
+import CODE.DBConnection;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLIntegrityConstraintViolationException;
 /**
  *
  * @author senub
@@ -15,8 +21,55 @@ public class New_tier_rule extends javax.swing.JFrame {
     /**
      * Creates new form New_tier_rule
      */
+    private final Discount_and_Delivery parentFrame;
+    private final Integer tierId;   // null = new tier, a number = editing that tier
+
     public New_tier_rule() {
+        this(null);
+    }
+
+    // CREATE mode ("+ New Tier Rule" button)
+    public New_tier_rule(Discount_and_Delivery parentFrame) {
+        this(parentFrame, null);
+    }
+
+    // UPDATE mode ("edit" button)
+    public New_tier_rule(Discount_and_Delivery parentFrame, Integer tierId) {
         initComponents();
+        this.parentFrame = parentFrame;
+        this.tierId = tierId;
+
+        if (tierId != null) {
+            New_Tier_Rule_Plane_text.setText("Edit Tier Rule");
+            Save_RuleBtn.setText("Update Rule");
+            loadTier(tierId);
+        }
+    }
+
+    // Fills the text boxes with the tier's current values
+    private void loadTier(int id) {
+        String sql = "SELECT tier_name, min_points, max_points, discount_percentage "
+                   + "FROM loyalty_tiers WHERE tier_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    Tier_Name_Input.setText(rs.getString("tier_name"));
+                    Min_Points_Input.setText(String.valueOf(rs.getInt("min_points")));
+                    Object maxObj = rs.getObject("max_points");
+                    Max_Points_Input.setText(maxObj == null ? "" : String.valueOf(rs.getInt("max_points")));
+                    Discount_Presentaage_Input.setText(
+                        rs.getBigDecimal("discount_percentage").stripTrailingZeros().toPlainString());
+                } else {
+                    showError("This tier no longer exists.");
+                    Save_RuleBtn.setEnabled(false);
+                }
+            }
+        } catch (SQLException e) {
+            showError("Database error: " + e.getMessage());
+            Save_RuleBtn.setEnabled(false);
+        }
     }
 
     /**
@@ -42,28 +95,35 @@ public class New_tier_rule extends javax.swing.JFrame {
         Discount_Presentaage_Input = new javax.swing.JTextField();
         Save_RuleBtn = new javax.swing.JToggleButton();
 
-        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
-        jPanel1.setBackground(new java.awt.Color(204, 255, 255));
+        jPanel1.setBackground(new java.awt.Color(246, 245, 242));
 
-        Discount_and_Delivery_SUB_Interface_Palne_Text.setText("Discount & Delivery - SUB-Interface");
+        jPanel2.setBackground(new java.awt.Color(255, 255, 255));
+
+        Discount_and_Delivery_SUB_Interface_Palne_Text.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
+        Discount_and_Delivery_SUB_Interface_Palne_Text.setText("Discount & Delivery");
 
         New_Tier_Rule_Plane_text.setFont(new java.awt.Font("Segoe UI", 1, 21)); // NOI18N
         New_Tier_Rule_Plane_text.setText("New Tier Rule");
 
+        Tier_Name_Plane_text.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         Tier_Name_Plane_text.setText("Tier Name");
 
+        Min_Points_Plane_text.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         Min_Points_Plane_text.setText("Min Points");
 
         Max_Points_Input.addActionListener(this::Max_Points_InputActionPerformed);
 
+        Max_Points_Plane_text.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         Max_Points_Plane_text.setText("Max Points");
 
         Min_Points_Input.addActionListener(this::Min_Points_InputActionPerformed);
 
+        Discount_Presentaage_Plane_text.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         Discount_Presentaage_Plane_text.setText("Discount Presentaage");
 
-        Save_RuleBtn.setBackground(new java.awt.Color(0, 153, 51));
+        Save_RuleBtn.setBackground(new java.awt.Color(11, 107, 109));
         Save_RuleBtn.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         Save_RuleBtn.setForeground(new java.awt.Color(255, 255, 255));
         Save_RuleBtn.setText("Save Rule");
@@ -74,32 +134,24 @@ public class New_tier_rule extends javax.swing.JFrame {
         jPanel2Layout.setHorizontalGroup(
             jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel2Layout.createSequentialGroup()
+                .addGap(19, 19, 19)
                 .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel2Layout.createSequentialGroup()
-                        .addContainerGap()
-                        .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(Tier_Name_Plane_text)
-                            .addComponent(Tier_Name_Input, javax.swing.GroupLayout.PREFERRED_SIZE, 395, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(New_Tier_Rule_Plane_text)
-                            .addComponent(Discount_and_Delivery_SUB_Interface_Palne_Text)))
-                    .addGroup(jPanel2Layout.createSequentialGroup()
-                        .addGap(19, 19, 19)
-                        .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(Save_RuleBtn, javax.swing.GroupLayout.PREFERRED_SIZE, 395, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                .addComponent(Discount_Presentaage_Plane_text, javax.swing.GroupLayout.PREFERRED_SIZE, 122, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addGroup(jPanel2Layout.createSequentialGroup()
-                                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                        .addGroup(jPanel2Layout.createSequentialGroup()
-                                            .addComponent(Min_Points_Plane_text)
-                                            .addGap(140, 140, 140))
-                                        .addGroup(jPanel2Layout.createSequentialGroup()
-                                            .addComponent(Min_Points_Input)
-                                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)))
-                                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                        .addComponent(Max_Points_Plane_text, javax.swing.GroupLayout.PREFERRED_SIZE, 64, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                        .addComponent(Max_Points_Input, javax.swing.GroupLayout.PREFERRED_SIZE, 198, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                                .addComponent(Discount_Presentaage_Input)))))
+                    .addComponent(Discount_and_Delivery_SUB_Interface_Palne_Text)
+                    .addComponent(Tier_Name_Plane_text)
+                    .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                        .addComponent(Save_RuleBtn, javax.swing.GroupLayout.PREFERRED_SIZE, 395, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGroup(jPanel2Layout.createSequentialGroup()
+                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(Min_Points_Input, javax.swing.GroupLayout.PREFERRED_SIZE, 198, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(Min_Points_Plane_text, javax.swing.GroupLayout.PREFERRED_SIZE, 105, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(Max_Points_Input, javax.swing.GroupLayout.PREFERRED_SIZE, 198, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(Max_Points_Plane_text, javax.swing.GroupLayout.PREFERRED_SIZE, 98, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addComponent(Discount_Presentaage_Input)
+                        .addComponent(Tier_Name_Input)
+                        .addComponent(Discount_Presentaage_Plane_text))
+                    .addComponent(New_Tier_Rule_Plane_text))
                 .addContainerGap(21, Short.MAX_VALUE))
         );
         jPanel2Layout.setVerticalGroup(
@@ -135,7 +187,7 @@ public class New_tier_rule extends javax.swing.JFrame {
         jPanel1Layout.setHorizontalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
-                .addContainerGap(398, Short.MAX_VALUE)
+                .addContainerGap(385, Short.MAX_VALUE)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(367, 367, 367))
         );
@@ -144,7 +196,7 @@ public class New_tier_rule extends javax.swing.JFrame {
             .addGroup(jPanel1Layout.createSequentialGroup()
                 .addGap(103, 103, 103)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(125, Short.MAX_VALUE))
+                .addContainerGap(109, Short.MAX_VALUE))
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -226,9 +278,74 @@ public class New_tier_rule extends javax.swing.JFrame {
         return;
     }
 
-    // 6. All valid — save the new tier rule here
-    // TODO: e.g. insert {tierName, minPoints, maxPoints, discount} into your tiers table/model
-    javax.swing.JOptionPane.showMessageDialog(this, "Tier rule saved successfully!");
+    // 6. All valid - INSERT (new tier) or UPDATE (edit tier)
+        boolean ok;
+        if (tierId == null) {
+            ok = insertTierRule(tierName, minPoints, maxPoints, discount);
+        } else {
+            ok = updateTierRule(tierId, tierName, minPoints, maxPoints, discount);
+        }
+
+        if (ok) {
+            javax.swing.JOptionPane.showMessageDialog(this,
+                tierId == null ? "Tier rule saved successfully!" : "Tier rule updated successfully!");
+            if (parentFrame != null) {
+                parentFrame.loadLoyaltyTiers();
+            }
+            this.dispose();
+        }
+    }
+
+    // CREATE
+    private boolean insertTierRule(String tierName, int minPoints, int maxPoints, float discount) {
+        String sql = "INSERT INTO loyalty_tiers (tier_name, min_points, max_points, discount_percentage) "
+                   + "VALUES (?, ?, ?, ?)";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tierName);
+            ps.setInt(2, minPoints);
+            ps.setInt(3, maxPoints);
+            ps.setFloat(4, discount);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLIntegrityConstraintViolationException e) {
+            showError("A tier named \"" + tierName + "\" already exists.");
+            return false;
+        } catch (SQLException e) {
+            showError("Database error: " + e.getMessage());
+            return false;
+        }
+    }
+    
+
+    // UPDATE
+    private boolean updateTierRule(int id, String tierName, int minPoints, int maxPoints, float discount) {
+        String sql = "UPDATE loyalty_tiers "
+                   + "SET tier_name = ?, min_points = ?, max_points = ?, discount_percentage = ? "
+                   + "WHERE tier_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tierName);
+            ps.setInt(2, minPoints);
+            ps.setInt(3, maxPoints);
+            ps.setFloat(4, discount);
+            ps.setInt(5, id);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLIntegrityConstraintViolationException e) {
+            showError("A tier named \"" + tierName + "\" already exists.");
+            return false;
+        } catch (SQLException e) {
+            showError("Database error: " + e.getMessage());
+            return false;
+        }
+    }    
+
+    private void clearForm() {
+        Tier_Name_Input.setText("");
+        Min_Points_Input.setText("");
+        Max_Points_Input.setText("");
+        Discount_Presentaage_Input.setText("");
 }
 
 private void showError(String message) {

@@ -4,6 +4,15 @@
  */
 package GUI;
 
+import CODE.OrderDAO;
+import java.math.BigDecimal;
+import javax.swing.JOptionPane;
+import CODE.DBConnection;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.math.RoundingMode;
 /**
  *
  * @author User
@@ -12,11 +21,35 @@ public class OrderReview extends javax.swing.JFrame {
     
     private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(OrderReview.class.getName());
     private String selectedFulfillmentMode = null;
+    private final java.util.List<CODE.OrderDAO.CartItem> cart;
+    private final CODE.OrderDAO orderDAO = new CODE.OrderDAO();
+    private java.math.BigDecimal computedSubtotal = java.math.BigDecimal.ZERO;
+    private final int customerId;
+    private java.math.BigDecimal computedLoyaltyDiscount = java.math.BigDecimal.ZERO;
+    private POS_Billing billingWindow; // the Billing screen that opened this review
     /**
      * Creates new form OrderReview
      */
     public OrderReview() {
+        this(new java.util.ArrayList<>(), 1); // fallback for NetBeans Design view / no-arg testing — not for real use
+    }
+
+    public OrderReview(java.util.List<CODE.OrderDAO.CartItem> cart) {
+        this(cart, 1); // TODO: remove once the calling screen passes the real customerId
+    }
+
+    public OrderReview(java.util.List<CODE.OrderDAO.CartItem> cart, int customerId) {
         initComponents();
+        CODE.NavBar.addTo(this, "← Back to Billing", () -> EditOrderBtnActionPerformed(null)); // same as Edit Order
+        this.cart = cart;
+        this.customerId = customerId;
+        populateOrderReview();
+    }
+ 
+
+    // Called by POS_Billing so the Edit Order button knows where to go back to
+    public void setBillingWindow(POS_Billing billingWindow) {
+        this.billingWindow = billingWindow;
     }
 
     /**
@@ -28,9 +61,6 @@ public class OrderReview extends javax.swing.JFrame {
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
-        jPasswordField1 = new javax.swing.JPasswordField();
-        jScrollPane5 = new javax.swing.JScrollPane();
-        jTable5 = new javax.swing.JTable();
         jPanel1 = new javax.swing.JPanel();
         jPanel2 = new javax.swing.JPanel();
         OrderReviewLable = new javax.swing.JLabel();
@@ -61,22 +91,7 @@ public class OrderReview extends javax.swing.JFrame {
         OrderReviewScrollPane = new javax.swing.JScrollPane();
         OrderReviewTable = new javax.swing.JTable();
 
-        jPasswordField1.setText("jPasswordField1");
-
-        jTable5.setModel(new javax.swing.table.DefaultTableModel(
-            new Object [][] {
-                {null, null, null, null},
-                {null, null, null, null},
-                {null, null, null, null},
-                {null, null, null, null}
-            },
-            new String [] {
-                "Title 1", "Title 2", "Title 3", "Title 4"
-            }
-        ));
-        jScrollPane5.setViewportView(jTable5);
-
-        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 
         jPanel1.setBackground(new java.awt.Color(245, 243, 240));
 
@@ -222,7 +237,7 @@ public class OrderReview extends javax.swing.JFrame {
         OrderReviewTable.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         OrderReviewTable.setModel(new javax.swing.table.DefaultTableModel(
             new Object [][] {
-                {"Budhu Pilma",  new Integer(2),  new Float(200.0),  new Float(400.0)}
+
             },
             new String [] {
                 "Product", "Qty", "Unit Price", "Line Total"
@@ -376,7 +391,11 @@ public class OrderReview extends javax.swing.JFrame {
     }//GEN-LAST:event_PickupBtnActionPerformed
 
     private void EditOrderBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_EditOrderBtnActionPerformed
-        // TODO add your handling code here:
+        this.dispose(); // close Order Review
+
+        if (billingWindow != null) {
+            billingWindow.returnToBilling(); // bring back the window that shows Billing (the Dashboard)
+        }
     }//GEN-LAST:event_EditOrderBtnActionPerformed
 
     private void DeliveryBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_DeliveryBtnActionPerformed
@@ -386,12 +405,31 @@ public class OrderReview extends javax.swing.JFrame {
 
     private void ConfirmOrderBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_ConfirmOrderBtnActionPerformed
             if (selectedFulfillmentMode == null) {
-           javax.swing.JOptionPane.showMessageDialog(this,
-               "Please select Pickup or Delivery before confirming the order.",
-               "Fulfillment Mode Required",
-               javax.swing.JOptionPane.WARNING_MESSAGE);
-           return;
-       }
+                javax.swing.JOptionPane.showMessageDialog(this,
+                    "Please select Pickup or Delivery before confirming the order.",
+                    "Fulfillment Mode Required",
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // TODO: replace hardcoded currentUserId once Session.currentUserId is wired here
+            int currentUserId = CODE.Session.getCurrentUserId();
+
+            int orderId = orderDAO.createOrder(customerId, currentUserId, cart,
+                    computedLoyaltyDiscount, selectedFulfillmentMode);
+
+            if (orderId == -1) {
+                javax.swing.JOptionPane.showMessageDialog(this,
+                    "Failed to create the order. Please try again.",
+                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            PayementScreen payment = new PayementScreen(orderId);
+            payment.setPreviousScreens(this, billingWindow); // so Payment's Back button can return here
+            payment.setLocationRelativeTo(this);
+            payment.setVisible(true);
+            this.setVisible(false); // hide (don't close) so Back can show it again
     }//GEN-LAST:event_ConfirmOrderBtnActionPerformed
 
     //Conform order Rules
@@ -405,7 +443,70 @@ public class OrderReview extends javax.swing.JFrame {
     DeliveryBtn.setBackground(isDelivery ? new java.awt.Color(11, 107, 109) : null);
     DeliveryBtn.setForeground(isDelivery ? java.awt.Color.WHITE : java.awt.Color.BLACK);
 }
-    
+    private void populateOrderReview() {
+        javax.swing.table.DefaultTableModel model =
+                (javax.swing.table.DefaultTableModel) OrderReviewTable.getModel();
+        model.setRowCount(0); // clear any existing rows
+
+        computedSubtotal = java.math.BigDecimal.ZERO;
+
+        for (CODE.OrderDAO.CartItem item : cart) {
+            model.addRow(new Object[]{
+                item.productName,
+                item.quantity,
+                item.unitPrice,
+                item.lineTotal()
+            });
+            computedSubtotal = computedSubtotal.add(item.lineTotal());
+        }
+
+        String customerFullName = "-";
+        java.math.BigDecimal discountPercentage = java.math.BigDecimal.ZERO;
+//READ
+        String sql = "SELECT c.full_name, c.loyalty_points, t.discount_percentage "
+           + "FROM customers c "
+           + "LEFT JOIN loyalty_tiers t ON c.loyalty_tier = t.tier_name "
+           + "WHERE c.customer_id = ? "
+           + "LIMIT 1";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, customerId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String name = rs.getString("full_name");
+                    customerFullName = (name == null || name.isEmpty()) ? "-" : name;
+                    java.math.BigDecimal pct = rs.getBigDecimal("discount_percentage");
+                    if (pct != null) {
+                        discountPercentage = pct;
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load customer/loyalty data", e);
+            javax.swing.JOptionPane.showMessageDialog(this,
+                "Failed to load customer details: " + e.getMessage(),
+                "Database Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+        }
+
+        CustomerName.setText(customerFullName);
+        LoyaltyDiscountLable.setText("Loyalty discount applied: " + discountPercentage + "%");
+        LoyaltyDiscountPresentage.setText("Loyalty Discount (" + discountPercentage + "%)");
+
+        computedLoyaltyDiscount = computedSubtotal
+                .multiply(discountPercentage)
+                .divide(java.math.BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+
+        // TODO: replace with real delivery fee once Delivery module logic is wired
+        java.math.BigDecimal deliveryFee = java.math.BigDecimal.ZERO;
+
+        java.math.BigDecimal total = computedSubtotal.subtract(computedLoyaltyDiscount).add(deliveryFee);
+
+        Subtotal.setText(String.format("Rs. %.2f", computedSubtotal));
+        LoyaltyDiscount.setText(String.format("Rs. %.2f", computedLoyaltyDiscount));
+        DeliveryFee.setText(String.format("Rs. %.2f", deliveryFee));
+        TotalAmount.setText(String.format("Rs. %.2f", total));
+    }
     /**
      * @param args the command line arguments
      */
@@ -461,8 +562,5 @@ public class OrderReview extends javax.swing.JFrame {
     private javax.swing.JPanel jPanel3;
     private javax.swing.JPanel jPanel4;
     private javax.swing.JPanel jPanel5;
-    private javax.swing.JPasswordField jPasswordField1;
-    private javax.swing.JScrollPane jScrollPane5;
-    private javax.swing.JTable jTable5;
     // End of variables declaration//GEN-END:variables
 }
